@@ -16,7 +16,7 @@ export class SwigSessionService {
     return this.store.hasActiveSession();
   }
 
-  async persistFromCompleteAuth(result: PersistableAuthResult): Promise<void> {
+  async persistFromCompleteAuth(_result: PersistableAuthResult): Promise<void> {
     // TODO(SWI-289):
     // Replace with authoritative session material once backend session exchange
     // and refresh/revocation contracts are finalized.
