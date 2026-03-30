@@ -1,0 +1,26 @@
+{
+  "name": "@swig-wallet/expo-idp-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@swig-wallet/classic": "^1.7.0",
+    "expo-crypto": "*",
+    "expo-secure-store": "*",
+    "expo-web-browser": "*",
+    "react": "^19.0.0",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.14",
+    "typescript": "^5.9.2"
+  }
+}
