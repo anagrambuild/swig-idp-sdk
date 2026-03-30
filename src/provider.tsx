@@ -31,11 +31,12 @@ export type SessionDataResponse = {
   roleId: number;
 };
 
+const DEFAULT_BACKEND_API_URL = "https://backend.prod.infra.onswig.com";
 const DEFAULT_ISOLATED_HOST_URL = "https://swig-dev-portal-isolated-host.vercel.app";
 
 export type SwigIdpConfig = {
-  /** Backend API base URL (e.g. "https://api.onswig.com") */
-  baseUrl: string;
+  /** Optional override for the backend API base URL */
+  baseUrl?: string;
   /** Optional override for the isolated host URL */
   isolatedHostUrl?: string;
   /** Deep link redirect URI for OAuth callbacks (e.g. "myapp://auth/callback") */
@@ -76,12 +77,19 @@ export const SwigIdpContext = createContext<SwigIdpContextValue | undefined>(und
 
 export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): ReactNode {
   const [state, dispatch] = useReducer(authMachineReducer, initialAuthMachineState);
-  const isolatedHostUrl = config.isolatedHostUrl ?? DEFAULT_ISOLATED_HOST_URL;
+  const resolvedConfig = useMemo(
+    () => ({
+      ...config,
+      baseUrl: config.baseUrl ?? DEFAULT_BACKEND_API_URL,
+    }),
+    [config],
+  );
+  const isolatedHostUrl = resolvedConfig.isolatedHostUrl ?? DEFAULT_ISOLATED_HOST_URL;
 
-  const api = useMemo(() => new SwigApiClient(config), [config]);
+  const api = useMemo(() => new SwigApiClient(resolvedConfig), [resolvedConfig]);
   const sessionStore = useMemo(
-    () => resolveSwigSessionStore(config.storage, config.storageKey ?? DEFAULT_STORAGE_KEY),
-    [config.storage, config.storageKey],
+    () => resolveSwigSessionStore(resolvedConfig.storage, resolvedConfig.storageKey ?? DEFAULT_STORAGE_KEY),
+    [resolvedConfig.storage, resolvedConfig.storageKey],
   );
   const sessionService = useMemo(() => new SwigSessionService(sessionStore), [sessionStore]);
 
@@ -91,19 +99,19 @@ export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): Rea
 
   const startOAuth = useCallback(
     async (input: StartOAuthInput) => {
-      if (!config.redirectUri) {
+      if (!resolvedConfig.redirectUri) {
         throw new Error("redirectUri must be set in SwigIdpConfig to use startOAuth");
       }
       return runStartOAuthFlow({
         input,
-        redirectUri: config.redirectUri,
+        redirectUri: resolvedConfig.redirectUri,
         isolatedHostUrl,
         api,
         sessionService,
         dispatch,
       });
     },
-    [api, config.redirectUri, isolatedHostUrl, sessionService],
+    [api, resolvedConfig.redirectUri, isolatedHostUrl, sessionService],
   );
 
   const listProviders = useCallback(

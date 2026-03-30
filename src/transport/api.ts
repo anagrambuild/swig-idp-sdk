@@ -1,5 +1,12 @@
 import type { SwigIdpConfig } from "../provider";
 
+type SwigApiClientConfig = Pick<
+  SwigIdpConfig,
+  "defaultHeaders" | "endpoints" | "fetch"
+> & {
+  baseUrl: string;
+};
+
 export type ListProvidersRequest = {
   client_id: string;
 };
@@ -160,7 +167,7 @@ export class SwigApiClient {
   private readonly fetchImpl: typeof fetch;
   private readonly endpoints: SwigBackendEndpoints;
 
-  constructor(private readonly config: SwigIdpConfig) {
+  constructor(private readonly config: SwigApiClientConfig) {
     this.fetchImpl = config.fetch ?? fetch;
     this.endpoints = {
       ...DEFAULT_ENDPOINTS,
