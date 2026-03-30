@@ -71,6 +71,7 @@ export function App() {
     <SwigIdpProvider
       config={{
         baseUrl: "https://api.example.com/backend",
+        redirectUri: "yourapp://auth/callback",
       }}
     >
       <LoginButton />
@@ -83,6 +84,7 @@ export function App() {
 
 - `proof/*`, `swig-session/*`, `states/*`, and `transport/*` are internal modules and not part of the stable SDK contract.
 - Session persistence defaults to `expo-secure-store`. Pass a custom `storage` adapter in config to override.
+- `isolatedHostUrl` is optional and defaults to `https://swig-dev-portal-isolated-host.vercel.app`.
 - Install `expo-secure-store` in the host Expo/React Native app.
 - High-level public flow is `beginAuth()` then `completeAuth()`.
 - `transport/api.ts` is a thin 1:1 wrapper over `api_idp.proto` and `api_wallet.proto` HTTP mappings.

@@ -31,11 +31,13 @@ export type SessionDataResponse = {
   roleId: number;
 };
 
+const DEFAULT_ISOLATED_HOST_URL = "https://swig-dev-portal-isolated-host.vercel.app";
+
 export type SwigIdpConfig = {
   /** Backend API base URL (e.g. "https://api.onswig.com") */
   baseUrl: string;
-  /** Isolated Host URL (e.g. "https://auth.onswig.com") */
-  isolatedHostUrl: string;
+  /** Optional override for the isolated host URL */
+  isolatedHostUrl?: string;
   /** Deep link redirect URI for OAuth callbacks (e.g. "myapp://auth/callback") */
   redirectUri?: string;
   endpoints?: Partial<SwigBackendEndpoints>;
@@ -74,6 +76,7 @@ export const SwigIdpContext = createContext<SwigIdpContextValue | undefined>(und
 
 export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): ReactNode {
   const [state, dispatch] = useReducer(authMachineReducer, initialAuthMachineState);
+  const isolatedHostUrl = config.isolatedHostUrl ?? DEFAULT_ISOLATED_HOST_URL;
 
   const api = useMemo(() => new SwigApiClient(config), [config]);
   const sessionStore = useMemo(
@@ -94,13 +97,13 @@ export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): Rea
       return runStartOAuthFlow({
         input,
         redirectUri: config.redirectUri,
-        isolatedHostUrl: config.isolatedHostUrl,
+        isolatedHostUrl,
         api,
         sessionService,
         dispatch,
       });
     },
-    [api, config.redirectUri, config.isolatedHostUrl, sessionService],
+    [api, config.redirectUri, isolatedHostUrl, sessionService],
   );
 
   const listProviders = useCallback(
