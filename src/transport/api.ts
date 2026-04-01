@@ -1,3 +1,4 @@
+import { NetworkValue } from "../utils";
 import type { SwigIdpConfig } from "../provider";
 
 type SwigApiClientConfig = Pick<
@@ -34,6 +35,7 @@ export type StartAuthRequest = {
   client_id: string;
   redirect_uri: string;
   state: string;
+  network: NetworkValue;
 };
 
 export type StartAuthResponse = {
@@ -44,7 +46,7 @@ export type StartAuthResponse = {
 export type SignupRequest = {
   client_id: string;
   zk_proof: string;
-  network: string;
+  network: NetworkValue;
 };
 
 export type SignupResponse = {
@@ -60,7 +62,7 @@ export type CreateSessionRequest = {
   zk_proof: string;
   session_key: string;
   duration: number;
-  network: string;
+  network: NetworkValue;
 };
 
 export type CreateSessionResponse = {

@@ -1,4 +1,5 @@
 import { openAuthSessionAsync } from "expo-web-browser";
+import { type NetworkValue } from "../utils";
 import type { SwigApiClient } from "../transport/api";
 import type { SwigSessionService } from "../swig-session/session-service";
 import type { AuthDispatch } from "./states";
@@ -13,6 +14,8 @@ export type StartOAuthInput = {
   flow?: "role" | "session";
   /** Policy ID for role flow */
   policyId?: string;
+  /** Solana network (default: Network.Devnet) */
+  network: NetworkValue;
 };
 
 /**
@@ -45,6 +48,7 @@ export const runStartOAuthFlow = async ({
     client_id: input.clientId,
     redirect_uri: redirectUri,
     state: "",
+    network: input.network,
   });
 
   // 2. Build IH /start URL with all params

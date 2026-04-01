@@ -18,6 +18,7 @@ import {
   type ListProvidersResponse,
   type SwigBackendEndpoints,
 } from "./transport/api";
+import { Network, NetworkValue } from "./utils";
 
 export type SessionStorageAdapter = {
   getItem(key: string): Promise<string | null>;
@@ -33,6 +34,7 @@ export type SessionDataResponse = {
 
 const DEFAULT_BACKEND_API_URL = "https://backend.prod.infra.onswig.com";
 const DEFAULT_ISOLATED_HOST_URL = "https://swig-dev-portal-isolated-host.vercel.app";
+const DEFAULT_NETWORK = Network.Devnet;
 
 export type SwigIdpConfig = {
   /** Optional override for the backend API base URL */
@@ -46,6 +48,7 @@ export type SwigIdpConfig = {
   fetch?: typeof fetch;
   storage?: SessionStorageAdapter;
   storageKey?: string;
+  network?: NetworkValue
 };
 
 export type SwigIdpContextValue = {
@@ -81,6 +84,7 @@ export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): Rea
     () => ({
       ...config,
       baseUrl: config.baseUrl ?? DEFAULT_BACKEND_API_URL,
+      network: config.network ?? DEFAULT_NETWORK,
     }),
     [config],
   );
@@ -98,12 +102,15 @@ export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): Rea
   }, [sessionService]);
 
   const startOAuth = useCallback(
-    async (input: StartOAuthInput) => {
+    async (input: Omit<StartOAuthInput, "network">) => {
       if (!resolvedConfig.redirectUri) {
         throw new Error("redirectUri must be set in SwigIdpConfig to use startOAuth");
       }
+      if (!resolvedConfig.network) {
+        throw new Error("Network not set");
+      }
       return runStartOAuthFlow({
-        input,
+        input: { ...input, network: resolvedConfig.network },
         redirectUri: resolvedConfig.redirectUri,
         isolatedHostUrl,
         api,
