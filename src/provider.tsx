@@ -56,7 +56,7 @@ export type SwigIdpContextValue = {
   isAuthenticated: boolean;
   authPhase: SwigAuthPhase;
   /** All-in-one OAuth: opens browser, handles callback, returns session */
-  startOAuth(input: StartOAuthInput): Promise<PersistedSwigSession>;
+  startOAuth(input: Omit<StartOAuthInput, "network">): Promise<PersistedSwigSession>;
   /** Get persisted session data */
   getSession(): Promise<SessionDataResponse | null>;
   /** Clear session and log out */
