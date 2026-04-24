@@ -36,7 +36,7 @@ src/
 import { SwigIdpProvider, useSwigIdp } from "@swig-wallet/expo-idp-sdk";
 
 function LoginButton() {
-  const { beginAuth, completeAuth, isAuthenticated, authPhase } = useSwigIdp();
+  const { startOAuth, isAuthenticated, authPhase } = useSwigIdp();
 
   if (isAuthenticated) {
     return null;
@@ -45,23 +45,15 @@ function LoginButton() {
   return (
     <button
       onClick={async () => {
-        const { redirect_url } = await beginAuth({
+        await startOAuth({
           provider: "google",
-          client_id: "your-client-id",
-          redirect_uri: "yourapp://callback",
-          state: "nonce-state",
-        });
-
-        // TODO: perform provider redirect + callback handling using redirect_url.
-        // TODO: generate zk_proof from callback artifacts before calling completeAuth.
-        await completeAuth({
-          client_id: "your-client-id",
-          network: "devnet",
-          zk_proof: "todo-zk-proof",
+          clientId: "your-client-id",
+          policyId: "your-policy-id",
+          flow: "role",
         });
       }}
     >
-      {authPhase === "begin_session_exchange" ? "Finalizing..." : "Continue"}
+      {authPhase === "begin_oauth" ? "Opening browser..." : "Continue"}
     </button>
   );
 }
@@ -86,14 +78,15 @@ export function App() {
 - `baseUrl` is optional and defaults to `https://backend.prod.infra.onswig.com`.
 - `isolatedHostUrl` is optional and defaults to `https://swig-dev-portal-isolated-host.vercel.app`.
 - Install `expo-secure-store` in the host Expo/React Native app.
-- High-level public flow is `beginAuth()` then `completeAuth()`.
+- High-level public flow is `startOAuth()`.
 - `transport/api.ts` is a thin 1:1 wrapper over `api_idp.proto` and `api_wallet.proto` HTTP mappings.
 - OAuth start now prefers a backend-issued `start_token` for the isolated host redirect, and falls back to the legacy raw redirect params only when the backend has not been upgraded yet.
+- Mobile auth is intentionally routed through `expo-web-browser` system auth sessions via `openAuthSessionAsync`.
+- Embedded `WebView` auth is unsupported. Do not load the isolated host inside `react-native-webview` or any host-controlled in-app browser if you need production security guarantees.
 - Business logic remains scaffolded with TODOs in:
   - `proof/proof-pipeline.ts`
   - `swig-session/session-service.ts`
   - `states/complete-auth.ts`
-- No webview / isolated-host module is used in this scaffold.
 - `completeAuth()` accepts either:
   - signup shape (`client_id`, `network`, `zk_proof`) or
   - session shape (`client_id`, `network`, `zk_proof`, `swig_pubkey`, `session_key`, `duration`)
@@ -123,3 +116,9 @@ export function App() {
   - `checkSwigAuth` -> `/wallet/swig/auth/check`
   - `createSwigSession` -> `/wallet/swig/session`
   - `getPolicy` -> `/wallet/policies/{policy_id}`
+
+## Security boundary
+
+- The SDK's supported mobile auth path is `startOAuth()`, which opens the isolated host in a system auth session.
+- Do not embed the isolated host in a `WebView`. A host app that owns the `WebView` can inspect DOM, URLs, and storage.
+- If you need a custom mobile integration, preserve the same boundary: backend start token -> isolated host -> system auth session -> deep link callback.
