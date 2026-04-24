@@ -42,26 +42,31 @@ export const runStartOAuthFlow = async ({
 }): Promise<PersistedSwigSession> => {
   dispatch({ type: "BEGIN_OAUTH" });
 
-  // 1. Begin auth → get redirect URL and nonce from backend
-  const { redirectUrl, state: nonce } = await api.startAuth({
+  // 1. Begin auth → get a trusted start token from the backend
+  const { redirectUrl, startToken, state: nonce } = await api.startAuth({
     provider: input.provider,
     client_id: input.clientId,
     redirect_uri: redirectUri,
     state: "",
     network: input.network,
+    flow: input.flow ?? "role",
+    ...(input.policyId ? { policy_id: input.policyId } : {}),
   });
 
-  // 2. Build IH /start URL with all params
-  const flow = input.flow ?? "role";
-  const startParams = new URLSearchParams({
-    nonce,
-    oauth_redirect: redirectUrl,
-    redirect_uri: redirectUri,
-    flow,
-    client_id: input.clientId,
-  });
-  if (input.policyId) {
-    startParams.set("policy_id", input.policyId);
+  // 2. Build IH /start URL with the trusted token when available.
+  const startParams = new URLSearchParams();
+  if (startToken) {
+    startParams.set("start_token", startToken);
+  } else {
+    const flow = input.flow ?? "role";
+    startParams.set("nonce", nonce);
+    startParams.set("oauth_redirect", redirectUrl);
+    startParams.set("redirect_uri", redirectUri);
+    startParams.set("flow", flow);
+    startParams.set("client_id", input.clientId);
+    if (input.policyId) {
+      startParams.set("policy_id", input.policyId);
+    }
   }
   const ihStartUrl = `${isolatedHostUrl}/start?${startParams.toString()}`;
 

@@ -36,11 +36,14 @@ export type StartAuthRequest = {
   redirect_uri: string;
   state: string;
   network: NetworkValue;
+  flow?: "role" | "session";
+  policy_id?: string;
 };
 
 export type StartAuthResponse = {
   redirectUrl: string;
   state: string;
+  startToken?: string;
 };
 
 export type SignupRequest = {
