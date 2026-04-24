@@ -1,6 +1,8 @@
+import type { NetworkValue } from "../utils";
+
 export type ResolveProofInput = {
   client_id: string;
-  network: string;
+  network: NetworkValue;
   zk_proof?: string;
   proof_payload?: Record<string, unknown>;
 };

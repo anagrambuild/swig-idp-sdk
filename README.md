@@ -88,6 +88,7 @@ export function App() {
 - Install `expo-secure-store` in the host Expo/React Native app.
 - High-level public flow is `beginAuth()` then `completeAuth()`.
 - `transport/api.ts` is a thin 1:1 wrapper over `api_idp.proto` and `api_wallet.proto` HTTP mappings.
+- OAuth start now prefers a backend-issued `start_token` for the isolated host redirect, and falls back to the legacy raw redirect params only when the backend has not been upgraded yet.
 - Business logic remains scaffolded with TODOs in:
   - `proof/proof-pipeline.ts`
   - `swig-session/session-service.ts`

@@ -4,11 +4,12 @@ import type {
   SwigSessionService,
 } from "../swig-session/session-service";
 import type { SwigApiClient, CreateSessionRequest } from "../transport/api";
+import type { NetworkValue } from "../utils";
 import type { AuthDispatch } from "./states";
 
 export type CompleteAuthInput = {
   client_id: string;
-  network: string;
+  network: NetworkValue;
   zk_proof?: string;
   proof_payload?: Record<string, unknown>;
   swig_pubkey?: CreateSessionRequest["swig_pubkey"];
@@ -20,7 +21,7 @@ export type CompleteAuthOutput = PersistableAuthResult;
 
 type ResolveSwigJwtArtifactInput = {
   client_id: string;
-  network: string;
+  network: NetworkValue;
   proof_payload?: Record<string, unknown>;
 };
 
