@@ -70,7 +70,8 @@ export const runStartOAuthFlow = async ({
   }
   const ihStartUrl = `${isolatedHostUrl}/start?${startParams.toString()}`;
 
-  // 3. Open system browser — IH handles OAuth, ZK proof, approval, add_role
+  // 3. Open a system auth session. Embedded WebViews are intentionally unsupported
+  // because the host app can inspect DOM, URLs, and storage for the isolated host.
   const result = await openAuthSessionAsync(ihStartUrl, redirectUri);
   if (result.type !== "success" || !("url" in result)) {
     dispatch({ type: "ERROR", message: "OAuth flow was cancelled" });
