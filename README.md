@@ -78,36 +78,26 @@ export function App() {
 ```tsx
 function EmailLogin() {
   const { startEmailOtp, authPhase } = useSwigIdp();
-  const [email, setEmail] = useState("");
 
   return (
-    <>
-      <input
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="you@example.com"
-      />
-      <button
-        onClick={async () => {
-          await startEmailOtp({
-            // provider defaults to "email_otp"; pass an explicit value if a
-            // tenant has registered its own email-otp provider key.
-            clientId: "your-client-id",
-            email,
-            policyId: "your-policy-id",
-            flow: "role",
-          });
-        }}
-      >
-        {authPhase === "begin_oauth" ? "Sending code..." : "Continue with email"}
-      </button>
-    </>
+    <button
+      onClick={async () => {
+        await startEmailOtp({
+          // provider defaults to "email_otp"; pass an explicit value if a
+          // tenant has registered its own email-otp provider key.
+          clientId: "your-client-id",
+          policyId: "your-policy-id",
+          flow: "role",
+        });
+      }}
+    >
+      {authPhase === "begin_oauth" ? "Opening browser..." : "Continue with email"}
+    </button>
   );
 }
 ```
 
-`startEmailOtp` POSTs the start request, opens the isolated host's OTP entry page in a system auth session, and resolves with the same session payload OAuth produces. The verification code, the callback JWT, and the user's email never enter the developer app — they live entirely inside the isolated host.
+`startEmailOtp` opens the isolated host's email entry page in a system auth session — the user types their address inside the IH, the IH sends the code, and the same OTP entry + verify + callback flow runs from there. The address, the verification code, and the callback JWT never enter the developer app. The function resolves with the same session payload OAuth produces.
 
 ## Notes
 
