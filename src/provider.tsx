@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { bootstrapAuthState } from "./states/bootstrap";
+import { type StartEmailOtpInput, runStartEmailOtpFlow } from "./states/start-email-otp";
 import { type StartOAuthInput, runStartOAuthFlow } from "./states/start-oauth";
 import { authMachineReducer, initialAuthMachineState, type SwigAuthPhase } from "./states/states";
 import { SwigSessionService } from "./swig-session/session-service";
@@ -57,6 +58,15 @@ export type SwigIdpContextValue = {
   authPhase: SwigAuthPhase;
   /** All-in-one OAuth: opens browser, handles callback, returns session */
   startOAuth(input: Omit<StartOAuthInput, "network">): Promise<PersistedSwigSession>;
+  /**
+   * All-in-one email OTP: posts the start request, opens the IH OTP entry
+   * page in a system auth session, returns the same session payload OAuth
+   * does. The verify step happens inside the IH so the developer app never
+   * sees the code or the callback JWT.
+   */
+  startEmailOtp(input: Omit<StartEmailOtpInput, "network">): Promise<PersistedSwigSession>;
+  /** Lookup providers configured for the current client. */
+  listProviders(input: { clientId: string }): Promise<ListProvidersResponse>;
   /** Get persisted session data */
   getSession(): Promise<SessionDataResponse | null>;
   /** Clear session and log out */
@@ -121,6 +131,25 @@ export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): Rea
     [api, resolvedConfig.redirectUri, isolatedHostUrl, sessionService],
   );
 
+  const startEmailOtp = useCallback(
+    async (input: Omit<StartEmailOtpInput, "network">) => {
+      if (!resolvedConfig.redirectUri) {
+        throw new Error("redirectUri must be set in SwigIdpConfig to use startEmailOtp");
+      }
+      if (!resolvedConfig.network) {
+        throw new Error("Network not set");
+      }
+      return runStartEmailOtpFlow({
+        input: { ...input, network: resolvedConfig.network },
+        redirectUri: resolvedConfig.redirectUri,
+        isolatedHostUrl,
+        sessionService,
+        dispatch,
+      });
+    },
+    [resolvedConfig.redirectUri, isolatedHostUrl, sessionService],
+  );
+
   const listProviders = useCallback(
     async (input: { clientId: string }): Promise<ListProvidersResponse> => {
       return api.listProviders({ client_id: input.clientId });
@@ -149,11 +178,21 @@ export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): Rea
       isAuthenticated: state.isAuthenticated,
       authPhase: state.phase,
       startOAuth,
+      startEmailOtp,
       getSession,
       listProviders,
       logout,
     }),
-    [getSession, listProviders, logout, startOAuth, state.isAuthenticated, state.isReady, state.phase],
+    [
+      getSession,
+      listProviders,
+      logout,
+      startOAuth,
+      startEmailOtp,
+      state.isAuthenticated,
+      state.isReady,
+      state.phase,
+    ],
   );
 
   return (
