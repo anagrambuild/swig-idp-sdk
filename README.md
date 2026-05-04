@@ -122,3 +122,7 @@ export function App() {
 - The SDK's supported mobile auth path is `startOAuth()`, which opens the isolated host in a system auth session.
 - Do not embed the isolated host in a `WebView`. A host app that owns the `WebView` can inspect DOM, URLs, and storage.
 - If you need a custom mobile integration, preserve the same boundary: backend start token -> isolated host -> system auth session -> deep link callback.
+
+## License
+
+Apache-2.0
