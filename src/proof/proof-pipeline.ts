@@ -1,4 +1,4 @@
-import type { NetworkValue } from "../utils";
+import type { NetworkValue } from "../utils.js";
 
 export type ResolveProofInput = {
   client_id: string;

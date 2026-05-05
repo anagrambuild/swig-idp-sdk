@@ -1,5 +1,5 @@
-import type { SwigApiClient, StartAuthRequest, StartAuthResponse } from "../transport/api";
-import type { AuthDispatch } from "./states";
+import type { SwigApiClient, StartAuthRequest, StartAuthResponse } from "../transport/api.js";
+import type { AuthDispatch } from "./states.js";
 
 export type BeginAuthInput = StartAuthRequest;
 

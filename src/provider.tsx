@@ -8,18 +8,23 @@ import {
   type ReactNode,
 } from "react";
 
-import { bootstrapAuthState } from "./states/bootstrap";
-import { type StartEmailOtpInput, runStartEmailOtpFlow } from "./states/start-email-otp";
-import { type StartOAuthInput, runStartOAuthFlow } from "./states/start-oauth";
-import { authMachineReducer, initialAuthMachineState, type SwigAuthPhase } from "./states/states";
-import { SwigSessionService } from "./swig-session/session-service";
-import { DEFAULT_STORAGE_KEY, type PersistedSwigSession, resolveSwigSessionStore } from "./swig-session/session-store";
+import {
+  DEFAULT_BACKEND_API_URL,
+  DEFAULT_ISOLATED_HOST_URL,
+  DEFAULT_NETWORK,
+} from "./config.js";
+import { bootstrapAuthState } from "./states/bootstrap.js";
+import { type StartEmailOtpInput, runStartEmailOtpFlow } from "./states/start-email-otp.js";
+import { type StartOAuthInput, runStartOAuthFlow } from "./states/start-oauth.js";
+import { authMachineReducer, initialAuthMachineState, type SwigAuthPhase } from "./states/states.js";
+import { SwigSessionService } from "./swig-session/session-service.js";
+import { DEFAULT_STORAGE_KEY, type PersistedSwigSession, resolveSwigSessionStore } from "./swig-session/session-store.js";
 import {
   SwigApiClient,
   type ListProvidersResponse,
   type SwigBackendEndpoints,
-} from "./transport/api";
-import { Network, NetworkValue } from "./utils";
+} from "./transport/api.js";
+import type { NetworkValue } from "./utils.js";
 
 export type SessionStorageAdapter = {
   getItem(key: string): Promise<string | null>;
@@ -32,10 +37,6 @@ export type SessionDataResponse = {
   walletAddress: string;
   roleId: number;
 };
-
-const DEFAULT_BACKEND_API_URL = "https://backend.prod.infra.onswig.com";
-const DEFAULT_ISOLATED_HOST_URL = "https://swig-dev-portal-isolated-host.vercel.app";
-const DEFAULT_NETWORK = Network.Devnet;
 
 export type SwigIdpConfig = {
   /** Optional override for the backend API base URL */
@@ -84,7 +85,7 @@ export type {
   ListProvidersRequest,
   ListProvidersResponse,
   SwigBackendEndpoints,
-} from "./transport/api";
+} from "./transport/api.js";
 
 export const SwigIdpContext = createContext<SwigIdpContextValue | undefined>(undefined);
 

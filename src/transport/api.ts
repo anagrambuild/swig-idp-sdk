@@ -1,5 +1,5 @@
-import { NetworkValue } from "../utils";
-import type { SwigIdpConfig } from "../provider";
+import { NetworkValue } from "../utils.js";
+import type { SwigIdpConfig } from "../provider.js";
 
 type SwigApiClientConfig = Pick<
   SwigIdpConfig,

@@ -1,5 +1,5 @@
-import type { SwigSessionService } from "../swig-session/session-service";
-import type { AuthDispatch } from "./states";
+import type { SwigSessionService } from "../swig-session/session-service.js";
+import type { AuthDispatch } from "./states.js";
 
 // Business logic for startup auth hydration belongs in this file.
 export const bootstrapAuthState = async ({

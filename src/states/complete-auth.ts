@@ -1,11 +1,11 @@
-import type { ProofPipeline } from "../proof/proof-pipeline";
+import type { ProofPipeline } from "../proof/proof-pipeline.js";
 import type {
   PersistableAuthResult,
   SwigSessionService,
-} from "../swig-session/session-service";
-import type { SwigApiClient, CreateSessionRequest } from "../transport/api";
-import type { NetworkValue } from "../utils";
-import type { AuthDispatch } from "./states";
+} from "../swig-session/session-service.js";
+import type { SwigApiClient, CreateSessionRequest } from "../transport/api.js";
+import type { NetworkValue } from "../utils.js";
+import type { AuthDispatch } from "./states.js";
 
 export type CompleteAuthInput = {
   client_id: string;
