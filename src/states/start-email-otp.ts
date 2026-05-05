@@ -6,7 +6,7 @@ import type { PersistedSwigSession } from "../swig-session/session-store";
 
 export type StartEmailOtpInput = {
   /**
-   * Email-OTP provider key. Defaults to "email_otp"; an explicit value lets
+   * Email-OTP provider key. Defaults to "email"; an explicit value lets
    * tenants register their own email-otp provider (e.g. "tenant_acme_email").
    */
   provider?: string;
@@ -32,7 +32,7 @@ export type StartEmailOtpInput = {
   network: NetworkValue;
 };
 
-const DEFAULT_EMAIL_OTP_PROVIDER = "email_otp";
+const DEFAULT_EMAIL_OTP_PROVIDER = "email";
 
 /**
  * All-in-one email-OTP flow for mobile.
