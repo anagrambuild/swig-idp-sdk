@@ -1,8 +1,9 @@
 import { openAuthSessionAsync } from "expo-web-browser";
-import { type NetworkValue } from "../utils";
-import type { SwigSessionService } from "../swig-session/session-service";
-import type { AuthDispatch } from "./states";
-import type { PersistedSwigSession } from "../swig-session/session-store";
+import { type NetworkValue } from "../utils.js";
+import type { SwigSessionService } from "../swig-session/session-service.js";
+import type { AuthDispatch } from "./states.js";
+import type { PersistedSwigSession } from "../swig-session/session-store.js";
+import { parseOAuthCallbackUrl } from "./oauth-callback.js";
 
 export type StartEmailOtpInput = {
   /**
@@ -75,7 +76,7 @@ export const runStartEmailOtpFlow = async ({
     throw new Error("Email OTP flow was cancelled");
   }
 
-  const session = parseSessionFromCallback(result.url);
+  const session = parseOAuthCallbackUrl(result.url);
   await sessionService.save(session);
 
   dispatch({ type: "AUTHENTICATED" });
@@ -102,37 +103,4 @@ function buildIsolatedHostStartUrl({
   if (input.state) params.set("state", input.state);
   if (input.appLabel) params.set("appLabel", input.appLabel);
   return `${base}/callback/email-otp/start?${params.toString()}`;
-}
-
-/**
- * Parse session data from the IH deep-link callback. The IH already ran the
- * OTP verify + ZK proof + add_role flow — we just extract the results. Kept
- * inline (rather than imported from start-oauth) so the two flows stay
- * independently testable.
- */
-function parseSessionFromCallback(url: string): PersistedSwigSession {
-  const params = new URL(url).searchParams;
-
-  const error = params.get("error");
-  if (error) {
-    throw new Error(params.get("error_description") ?? error);
-  }
-
-  const configAddress = params.get("swig_pubkey");
-  const walletAddress = params.get("wallet_address");
-  const roleId = params.get("role_id");
-
-  if (!configAddress || !walletAddress || !roleId) {
-    throw new Error(
-      "Missing required callback params: swig_pubkey, wallet_address, or role_id",
-    );
-  }
-
-  return {
-    configAddress,
-    walletAddress,
-    roleId: Number(roleId),
-    authFlow: "role",
-    updatedAt: Date.now(),
-  };
 }

@@ -1,0 +1,252 @@
+import {
+  DEFAULT_BACKEND_API_URL,
+  DEFAULT_ISOLATED_HOST_URL,
+  DEFAULT_NETWORK,
+} from "./config.js";
+import {
+  buildIsolatedHostStartUrl,
+  parseOAuthCallbackUrl,
+} from "./states/oauth-callback.js";
+import {
+  SwigApiClient,
+  type ListProvidersResponse,
+  type SwigBackendEndpoints,
+} from "./transport/api.js";
+import { Network, type NetworkValue } from "./utils.js";
+import type { PersistedSwigSession } from "./swig-session/session-store.js";
+
+export type WebSessionStorageAdapter = {
+  getItem(key: string): Promise<string | null>;
+  setItem(key: string, value: string): Promise<void>;
+  removeItem(key: string): Promise<void>;
+};
+
+export type WebSessionDataResponse = {
+  configAddress: string;
+  walletAddress: string;
+  roleId: number;
+};
+
+export type SwigWebSdkConfig = {
+  /** Optional override for the backend API base URL */
+  baseUrl?: string;
+  /** Optional override for the isolated host URL */
+  isolatedHostUrl?: string;
+  /** Web callback URL, e.g. "https://app.example.com/auth/callback" */
+  redirectUri?: string;
+  endpoints?: Partial<SwigBackendEndpoints>;
+  defaultHeaders?: Record<string, string>;
+  fetch?: typeof fetch;
+  /** Defaults to window.localStorage in the browser. */
+  storage?: WebSessionStorageAdapter;
+  storageKey?: string;
+  network?: NetworkValue;
+};
+
+export type StartWebOAuthInput = {
+  /** OAuth provider key, e.g. "google" or "demo-oidc" */
+  provider: string;
+  /** Developer's client ID */
+  clientId: string;
+  /** Flow type. The callback parser currently persists role-flow session data. */
+  flow?: "role" | "session";
+  /** Policy ID for role flow */
+  policyId?: string;
+  /** Optional per-request redirect URI override */
+  redirectUri?: string;
+  /** Optional state to send to the backend start endpoint */
+  state?: string;
+  /** Optional per-request network override */
+  network?: NetworkValue;
+};
+
+export type RedirectToOAuthOptions = {
+  mode?: "assign" | "replace";
+  location?: Pick<Location, "assign" | "replace">;
+};
+
+const DEFAULT_STORAGE_KEY = "swig.idp.session";
+
+class BrowserLocalStorageAdapter implements WebSessionStorageAdapter {
+  async getItem(key: string): Promise<string | null> {
+    return getBrowserLocalStorage().getItem(key);
+  }
+
+  async setItem(key: string, value: string): Promise<void> {
+    getBrowserLocalStorage().setItem(key, value);
+  }
+
+  async removeItem(key: string): Promise<void> {
+    getBrowserLocalStorage().removeItem(key);
+  }
+}
+
+class WebSessionStore {
+  constructor(
+    private readonly storage: WebSessionStorageAdapter,
+    private readonly storageKey: string,
+  ) {}
+
+  async load(): Promise<PersistedSwigSession | null> {
+    const raw = await this.storage.getItem(this.storageKey);
+
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const session = JSON.parse(raw) as PersistedSwigSession;
+      if (!session.configAddress || !session.walletAddress || session.roleId == null) {
+        await this.clear();
+        return null;
+      }
+      return session;
+    } catch {
+      await this.clear();
+      return null;
+    }
+  }
+
+  async save(session: PersistedSwigSession): Promise<void> {
+    await this.storage.setItem(this.storageKey, JSON.stringify(session));
+  }
+
+  async clear(): Promise<void> {
+    await this.storage.removeItem(this.storageKey);
+  }
+}
+
+export class SwigWebSdk {
+  private readonly api: SwigApiClient;
+  private readonly isolatedHostUrl: string;
+  private readonly redirectUri: string | undefined;
+  private readonly network: NetworkValue;
+  private readonly sessionStore: WebSessionStore;
+
+  constructor(config: SwigWebSdkConfig = {}) {
+    this.isolatedHostUrl = config.isolatedHostUrl ?? DEFAULT_ISOLATED_HOST_URL;
+    this.redirectUri = config.redirectUri;
+    this.network = config.network ?? DEFAULT_NETWORK;
+    this.sessionStore = new WebSessionStore(
+      config.storage ?? new BrowserLocalStorageAdapter(),
+      config.storageKey ?? DEFAULT_STORAGE_KEY,
+    );
+
+    this.api = new SwigApiClient({
+      baseUrl: config.baseUrl ?? DEFAULT_BACKEND_API_URL,
+      ...(config.endpoints ? { endpoints: config.endpoints } : {}),
+      ...(config.defaultHeaders ? { defaultHeaders: config.defaultHeaders } : {}),
+      ...(config.fetch ? { fetch: config.fetch } : {}),
+    });
+  }
+
+  async listProviders(input: { clientId: string }): Promise<ListProvidersResponse> {
+    return this.api.listProviders({ client_id: input.clientId });
+  }
+
+  async getOAuthStartUrl(input: StartWebOAuthInput): Promise<string> {
+    const redirectUri = this.resolveRedirectUri(input.redirectUri);
+    const flow = input.flow ?? "role";
+    const { redirectUrl, startToken, state: nonce } = await this.api.startAuth({
+      provider: input.provider,
+      client_id: input.clientId,
+      redirect_uri: redirectUri,
+      state: input.state ?? "",
+      network: input.network ?? this.network,
+      flow,
+      ...(input.policyId ? { policy_id: input.policyId } : {}),
+    });
+
+    return buildIsolatedHostStartUrl({
+      isolatedHostUrl: this.isolatedHostUrl,
+      redirectUri,
+      redirectUrl,
+      nonce,
+      flow,
+      clientId: input.clientId,
+      ...(startToken ? { startToken } : {}),
+      ...(input.policyId ? { policyId: input.policyId } : {}),
+    });
+  }
+
+  async redirectToOAuth(
+    input: StartWebOAuthInput,
+    options: RedirectToOAuthOptions = {},
+  ): Promise<void> {
+    const startUrl = await this.getOAuthStartUrl(input);
+    const location = options.location ?? getBrowserLocation();
+
+    if (options.mode === "replace") {
+      location.replace(startUrl);
+      return;
+    }
+
+    location.assign(startUrl);
+  }
+
+  async completeOAuthFromUrl(url?: string | URL): Promise<PersistedSwigSession> {
+    const session = parseOAuthCallbackUrl(url ?? getBrowserLocationHref());
+    await this.sessionStore.save(session);
+    return session;
+  }
+
+  parseOAuthCallbackUrl(url: string | URL): PersistedSwigSession {
+    return parseOAuthCallbackUrl(url);
+  }
+
+  async getSession(): Promise<WebSessionDataResponse | null> {
+    const persisted = await this.sessionStore.load();
+    if (!persisted) return null;
+
+    return {
+      configAddress: persisted.configAddress,
+      walletAddress: persisted.walletAddress,
+      roleId: persisted.roleId,
+    };
+  }
+
+  async getPersistedSession(): Promise<PersistedSwigSession | null> {
+    return this.sessionStore.load();
+  }
+
+  async logout(): Promise<void> {
+    await this.sessionStore.clear();
+  }
+
+  private resolveRedirectUri(redirectUri?: string): string {
+    const resolvedRedirectUri = redirectUri ?? this.redirectUri;
+
+    if (!resolvedRedirectUri) {
+      throw new Error("redirectUri must be set in SwigWebSdkConfig or StartWebOAuthInput");
+    }
+
+    return resolvedRedirectUri;
+  }
+}
+
+export const createSwigWebClient = (config: SwigWebSdkConfig = {}): SwigWebSdk => {
+  return new SwigWebSdk(config);
+};
+
+export { Network, parseOAuthCallbackUrl };
+export type { NetworkValue, PersistedSwigSession, SwigBackendEndpoints };
+
+const getBrowserLocalStorage = (): Storage => {
+  if (typeof window === "undefined" || !window.localStorage) {
+    throw new Error("window.localStorage is unavailable. Pass a custom storage adapter.");
+  }
+
+  return window.localStorage;
+};
+
+const getBrowserLocation = (): Location => {
+  if (typeof window === "undefined") {
+    throw new Error("window.location is unavailable. Call this method in a browser.");
+  }
+
+  return window.location;
+};
+
+const getBrowserLocationHref = (): string => {
+  return getBrowserLocation().href;
+};

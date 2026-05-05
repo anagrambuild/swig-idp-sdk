@@ -1,9 +1,13 @@
 import { openAuthSessionAsync } from "expo-web-browser";
-import { type NetworkValue } from "../utils";
-import type { SwigApiClient } from "../transport/api";
-import type { SwigSessionService } from "../swig-session/session-service";
-import type { AuthDispatch } from "./states";
-import type { PersistedSwigSession } from "../swig-session/session-store";
+import { type NetworkValue } from "../utils.js";
+import type { SwigApiClient } from "../transport/api.js";
+import type { SwigSessionService } from "../swig-session/session-service.js";
+import type { AuthDispatch } from "./states.js";
+import type { PersistedSwigSession } from "../swig-session/session-store.js";
+import {
+  buildIsolatedHostStartUrl,
+  parseOAuthCallbackUrl,
+} from "./oauth-callback.js";
 
 export type StartOAuthInput = {
   /** OAuth provider key (e.g. "google", "demo-oidc") */
@@ -54,21 +58,16 @@ export const runStartOAuthFlow = async ({
   });
 
   // 2. Build IH /start URL with the trusted token when available.
-  const startParams = new URLSearchParams();
-  if (startToken) {
-    startParams.set("start_token", startToken);
-  } else {
-    const flow = input.flow ?? "role";
-    startParams.set("nonce", nonce);
-    startParams.set("oauth_redirect", redirectUrl);
-    startParams.set("redirect_uri", redirectUri);
-    startParams.set("flow", flow);
-    startParams.set("client_id", input.clientId);
-    if (input.policyId) {
-      startParams.set("policy_id", input.policyId);
-    }
-  }
-  const ihStartUrl = `${isolatedHostUrl}/start?${startParams.toString()}`;
+  const ihStartUrl = buildIsolatedHostStartUrl({
+    isolatedHostUrl,
+    redirectUri,
+    redirectUrl,
+    nonce,
+    flow: input.flow ?? "role",
+    clientId: input.clientId,
+    ...(startToken ? { startToken } : {}),
+    ...(input.policyId ? { policyId: input.policyId } : {}),
+  });
 
   // 3. Open a system auth session. Embedded WebViews are intentionally unsupported
   // because the host app can inspect DOM, URLs, and storage for the isolated host.
@@ -79,39 +78,10 @@ export const runStartOAuthFlow = async ({
   }
 
   // 4. Parse session data from deep link (no JWT — just swig_pubkey, role_id, etc.)
-  const session = parseSessionFromCallback(result.url);
+  const session = parseOAuthCallbackUrl(result.url);
   // 5. Persist session
   await sessionService.save(session);
 
   dispatch({ type: "AUTHENTICATED" });
   return session;
 };
-
-/**
- * Parse session data from the IH callback deep link.
- * The IH already did all the work — we just extract the results.
- */
-function parseSessionFromCallback(url: string): PersistedSwigSession {
-  const params = new URL(url).searchParams;
-
-  const error = params.get("error");
-  if (error) {
-    throw new Error(params.get("error_description") ?? error);
-  }
-
-  const configAddress = params.get("swig_pubkey");
-  const walletAddress = params.get("wallet_address");
-  const roleId = params.get("role_id");
-
-  if (!configAddress || !walletAddress || !roleId) {
-    throw new Error("Missing required callback params: swig_pubkey, wallet_address, or role_id");
-  }
-
-  return {
-    configAddress,
-    walletAddress,
-    roleId: Number(roleId),
-    authFlow: "role",
-    updatedAt: Date.now(),
-  };
-}

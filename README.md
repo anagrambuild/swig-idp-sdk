@@ -6,6 +6,7 @@ Minimal Expo-compatible Swig IdP SDK scaffold.
 
 - `SwigIdpProvider`
 - `useSwigIdp()`
+- `createSwigWebClient()` from `@swig-wallet/expo-idp-sdk/web`
 - public types from `provider.tsx`
 
 ## Package structure
@@ -23,11 +24,14 @@ src/
     complete-auth.ts
     start-oauth.ts
     start-email-otp.ts
+    oauth-callback.ts
   swig-session/
     session-service.ts
     session-store.ts
   transport/
     api.ts
+  web.ts
+  config.ts
   index.ts
   provider.tsx
 ```
@@ -99,10 +103,53 @@ function EmailLogin() {
 
 `startEmailOtp` opens the isolated host's email entry page in a system auth session — the user types their address inside the IH, the IH sends the code, and the same OTP entry + verify + callback flow runs from there. The address, the verification code, and the callback JWT never enter the developer app. The function resolves with the same session payload OAuth produces.
 
+## Web usage
+
+Use the `/web` entry point in browser apps. This path does not import Expo modules.
+
+```ts
+import { Network, createSwigWebClient } from "@swig-wallet/expo-idp-sdk/web";
+
+const swig = createSwigWebClient({
+  redirectUri: `${window.location.origin}/auth/callback`,
+  network: Network.Devnet,
+});
+
+await swig.redirectToOAuth({
+  provider: "google",
+  clientId: "your-client-id",
+  policyId: "your-policy-id",
+  flow: "role",
+});
+```
+
+In your callback route:
+
+```ts
+import { createSwigWebClient } from "@swig-wallet/expo-idp-sdk/web";
+
+const swig = createSwigWebClient();
+const session = await swig.completeOAuthFromUrl(window.location.href);
+
+console.log(session.configAddress, session.walletAddress, session.roleId);
+```
+
+Useful web client methods:
+
+- `getOAuthStartUrl(input)` builds the isolated host URL without navigating.
+- `redirectToOAuth(input)` performs a full-page browser redirect.
+- `completeOAuthFromUrl(url)` parses and persists the callback session.
+- `getSession()` returns persisted session data.
+- `getPersistedSession()` returns the full persisted session.
+- `logout()` clears the stored session.
+- `listProviders({ clientId })` lists configured IdP providers.
+
+Web session persistence defaults to `window.localStorage`. Pass a custom `storage` adapter to use `sessionStorage`, cookies, or framework-managed storage.
+
 ## Notes
 
 - `proof/*`, `swig-session/*`, `states/*`, and `transport/*` are internal modules and not part of the stable SDK contract.
-- Session persistence defaults to `expo-secure-store`. Pass a custom `storage` adapter in config to override.
+- Expo session persistence defaults to `expo-secure-store`. Pass a custom `storage` adapter in config to override.
 - `baseUrl` is optional and defaults to `https://backend.prod.infra.onswig.com`.
 - `isolatedHostUrl` is optional and defaults to `https://swig-dev-portal-isolated-host.vercel.app`.
 - Install `expo-secure-store` in the host Expo/React Native app.

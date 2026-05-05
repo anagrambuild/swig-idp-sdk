@@ -1,4 +1,4 @@
-import type { PersistedSwigSession, SwigSessionStore } from "./session-store";
+import type { PersistedSwigSession, SwigSessionStore } from "./session-store.js";
 
 export type PersistableAuthResult = {
   flow: "signup" | "session";
