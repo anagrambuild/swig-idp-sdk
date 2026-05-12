@@ -38,6 +38,9 @@ export type StartAuthRequest = {
   network: NetworkValue;
   flow?: "role" | "session";
   policy_id?: string;
+  authority_public_key?: string;
+  role_intent?: "agent";
+  agent_name?: string;
 };
 
 export type StartAuthResponse = {
@@ -71,6 +74,58 @@ export type CreateSessionRequest = {
 export type CreateSessionResponse = {
   status: string;
   role_id: number;
+  signature: string;
+};
+
+export type ListAgentsRequest = {
+  client_id: string;
+  swig_pubkey: string;
+  network: NetworkValue;
+};
+
+export type AgentInfo = {
+  authority_public_key?: string;
+  authorityPublicKey?: string;
+  role_id?: number;
+  roleId?: number;
+  reputation_score?: number;
+  reputationScore?: number;
+  label?: string;
+  swig_pubkey?: string;
+  swigPubkey?: string;
+  wallet_address?: string;
+  walletAddress?: string;
+  created_at?: string;
+  createdAt?: string;
+};
+
+export type ListAgentsResponse = {
+  agents: AgentInfo[];
+};
+
+export type UpdateAgentReputationRequest = {
+  client_id: string;
+  swig_pubkey: string;
+  network: NetworkValue;
+  role_id: number;
+  reputation_score: number;
+};
+
+export type UpdateAgentReputationResponse = {
+  status: string;
+  reputation_score?: number;
+  reputationScore?: number;
+};
+
+export type RemoveRoleRequest = {
+  client_id: string;
+  zk_proof: string;
+  role_id: number;
+  network: NetworkValue;
+};
+
+export type RemoveRoleResponse = {
+  status: string;
   signature: string;
 };
 
@@ -128,6 +183,9 @@ export type SwigBackendEndpoints = {
   startAuth: string;
   signup: string;
   createSession: string;
+  listAgents: string;
+  updateAgentReputation: string;
+  removeRole: string;
   lookupSwig: string;
   getSwigStatus: string;
   checkSwigAuth: string;
@@ -140,6 +198,9 @@ const DEFAULT_ENDPOINTS: SwigBackendEndpoints = {
   startAuth: "/identity/api/auth/start",
   signup: "/identity/api/signup",
   createSession: "/identity/api/session",
+  listAgents: "/identity/api/agents",
+  updateAgentReputation: "/identity/api/agents/reputation",
+  removeRole: "/identity/api/role-remove",
   lookupSwig: "/wallet/swig/lookup",
   getSwigStatus: "/wallet/swig/status",
   checkSwigAuth: "/wallet/swig/auth/check",
@@ -168,6 +229,51 @@ const toQueryString = (params: Record<string, unknown>): string => {
   return query.length > 0 ? `?${query}` : "";
 };
 
+const decodeGrpcMessage = (message: string | null): string | null => {
+  if (!message) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(message.replace(/\+/g, "%20"));
+  } catch {
+    return message;
+  }
+};
+
+const getGrpcError = (method: string, response: Response): Error | null => {
+  const grpcStatus = response.headers.get("grpc-status");
+  if (!grpcStatus || grpcStatus === "0") {
+    return null;
+  }
+
+  const grpcMessage = decodeGrpcMessage(response.headers.get("grpc-message"));
+  const message = grpcMessage ? `: ${grpcMessage}` : "";
+  return new Error(`Swig API ${method} failed (grpc ${grpcStatus})${message}`);
+};
+
+const readJsonResponse = async <TResponse>(
+  method: string,
+  response: Response,
+): Promise<TResponse> => {
+  const grpcError = getGrpcError(method, response);
+  if (grpcError) {
+    throw grpcError;
+  }
+
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error(`Swig API ${method} returned an empty response`);
+  }
+
+  try {
+    return JSON.parse(text) as TResponse;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "invalid JSON";
+    throw new Error(`Swig API ${method} returned invalid JSON: ${reason}`);
+  }
+};
+
 export class SwigApiClient {
   private readonly fetchImpl: typeof fetch;
   private readonly endpoints: SwigBackendEndpoints;
@@ -191,12 +297,17 @@ export class SwigApiClient {
       },
     });
 
+    const grpcError = getGrpcError("GET", response);
+    if (grpcError) {
+      throw grpcError;
+    }
+
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`Swig API GET failed (${response.status}): ${text}`);
     }
 
-    return (await response.json()) as TResponse;
+    return readJsonResponse<TResponse>("GET", response);
   }
 
   private async post<TResponse>(path: string, body: Record<string, unknown>): Promise<TResponse> {
@@ -211,12 +322,40 @@ export class SwigApiClient {
       body: JSON.stringify(body),
     });
 
+    const grpcError = getGrpcError("POST", response);
+    if (grpcError) {
+      throw grpcError;
+    }
+
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`Swig API POST failed (${response.status}): ${text}`);
     }
 
-    return (await response.json()) as TResponse;
+    return readJsonResponse<TResponse>("POST", response);
+  }
+
+  private async patch<TResponse>(path: string, body: Record<string, unknown>): Promise<TResponse> {
+    const response = await this.fetchImpl(joinUrl(this.config.baseUrl, path), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.config.defaultHeaders ?? {}),
+      },
+      body: JSON.stringify(body),
+    });
+
+    const grpcError = getGrpcError("PATCH", response);
+    if (grpcError) {
+      throw grpcError;
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Swig API PATCH failed (${response.status}): ${text}`);
+    }
+
+    return readJsonResponse<TResponse>("PATCH", response);
   }
 
   // api_idp.proto
@@ -234,6 +373,23 @@ export class SwigApiClient {
 
   createSession(input: CreateSessionRequest): Promise<CreateSessionResponse> {
     return this.post<CreateSessionResponse>(this.endpoints.createSession, input);
+  }
+
+  listAgents(input: ListAgentsRequest): Promise<ListAgentsResponse> {
+    return this.get<ListAgentsResponse>(this.endpoints.listAgents, input);
+  }
+
+  updateAgentReputation(
+    input: UpdateAgentReputationRequest,
+  ): Promise<UpdateAgentReputationResponse> {
+    return this.patch<UpdateAgentReputationResponse>(
+      this.endpoints.updateAgentReputation,
+      input,
+    );
+  }
+
+  removeRole(input: RemoveRoleRequest): Promise<RemoveRoleResponse> {
+    return this.post<RemoveRoleResponse>(this.endpoints.removeRole, input);
   }
 
   // api_wallet.proto

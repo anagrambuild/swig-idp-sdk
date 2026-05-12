@@ -5,12 +5,16 @@ import {
 } from "./config.js";
 import {
   buildIsolatedHostStartUrl,
+  parseAgentRevokeCallbackUrl,
   parseOAuthCallbackUrl,
+  type AgentRevokeCallbackResult,
 } from "./states/oauth-callback.js";
 import {
   SwigApiClient,
+  type ListAgentsResponse,
   type ListProvidersResponse,
   type SwigBackendEndpoints,
+  type UpdateAgentReputationResponse,
 } from "./transport/api.js";
 import { Network, type NetworkValue } from "./utils.js";
 import type { PersistedSwigSession } from "./swig-session/session-store.js";
@@ -52,6 +56,12 @@ export type StartWebOAuthInput = {
   flow?: "role" | "session";
   /** Policy ID for role flow */
   policyId?: string;
+  /** Optional Ed25519 public key to add as the role authority. */
+  authorityPublicKey?: string;
+  /** Optional role intent used by One Wallet agent connect. */
+  roleIntent?: "agent";
+  /** Optional agent display name for agent role additions. */
+  agentName?: string;
   /** Optional per-request redirect URI override */
   redirectUri?: string;
   /** Optional state to send to the backend start endpoint */
@@ -63,6 +73,25 @@ export type StartWebOAuthInput = {
 export type RedirectToOAuthOptions = {
   mode?: "assign" | "replace";
   location?: Pick<Location, "assign" | "replace">;
+};
+
+export type RevokeAgentInput = {
+  /** Developer's client ID */
+  clientId: string;
+  /** Swig config public key containing the agent role. */
+  swigPubkey: string;
+  /** Optional Swig wallet address for callback context. */
+  walletAddress?: string;
+  /** Agent role id to revoke. */
+  roleId: number;
+  /** Optional agent authority public key for display and callback correlation. */
+  authorityPublicKey?: string;
+  /** Optional agent display name. */
+  agentName?: string;
+  /** Optional per-request redirect URI override */
+  redirectUri?: string;
+  /** Optional per-request network override */
+  network?: NetworkValue;
 };
 
 const DEFAULT_STORAGE_KEY = "swig.idp.session";
@@ -155,6 +184,9 @@ export class SwigWebSdk {
       network: input.network ?? this.network,
       flow,
       ...(input.policyId ? { policy_id: input.policyId } : {}),
+      ...(input.authorityPublicKey ? { authority_public_key: input.authorityPublicKey } : {}),
+      ...(input.roleIntent ? { role_intent: input.roleIntent } : {}),
+      ...(input.agentName ? { agent_name: input.agentName } : {}),
     });
 
     return buildIsolatedHostStartUrl({
@@ -166,7 +198,75 @@ export class SwigWebSdk {
       clientId: input.clientId,
       ...(startToken ? { startToken } : {}),
       ...(input.policyId ? { policyId: input.policyId } : {}),
+      ...(input.authorityPublicKey ? { authorityPublicKey: input.authorityPublicKey } : {}),
+      ...(input.roleIntent ? { roleIntent: input.roleIntent } : {}),
+      ...(input.agentName ? { agentName: input.agentName } : {}),
     });
+  }
+
+  async getAddAuthorityStartUrl(
+    input: Omit<StartWebOAuthInput, "flow"> & { authorityPublicKey: string },
+  ): Promise<string> {
+    return this.getOAuthStartUrl({
+      ...input,
+      flow: "role",
+    });
+  }
+
+  async redirectToAddAuthority(
+    input: Omit<StartWebOAuthInput, "flow"> & { authorityPublicKey: string },
+    options: RedirectToOAuthOptions = {},
+  ): Promise<void> {
+    const startUrl = await this.getAddAuthorityStartUrl(input);
+    const location = options.location ?? getBrowserLocation();
+
+    if (options.mode === "replace") {
+      location.replace(startUrl);
+      return;
+    }
+
+    location.assign(startUrl);
+  }
+
+  async getRevokeAgentStartUrl(input: RevokeAgentInput): Promise<string> {
+    const redirectUri = this.resolveRedirectUri(input.redirectUri);
+    const normalizedBaseUrl = this.isolatedHostUrl.endsWith("/")
+      ? this.isolatedHostUrl.slice(0, -1)
+      : this.isolatedHostUrl;
+    const url = new URL(`${normalizedBaseUrl}/agent/revoke`);
+
+    url.searchParams.set("client_id", input.clientId);
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("swig_pubkey", input.swigPubkey);
+    url.searchParams.set("role_id", String(input.roleId));
+    url.searchParams.set("network", String(input.network ?? this.network));
+
+    if (input.walletAddress) {
+      url.searchParams.set("wallet_address", input.walletAddress);
+    }
+    if (input.authorityPublicKey) {
+      url.searchParams.set("authority_public_key", input.authorityPublicKey);
+    }
+    if (input.agentName) {
+      url.searchParams.set("agent_name", input.agentName);
+    }
+
+    return url.toString();
+  }
+
+  async redirectToRevokeAgent(
+    input: RevokeAgentInput,
+    options: RedirectToOAuthOptions = {},
+  ): Promise<void> {
+    const startUrl = await this.getRevokeAgentStartUrl(input);
+    const location = options.location ?? getBrowserLocation();
+
+    if (options.mode === "replace") {
+      location.replace(startUrl);
+      return;
+    }
+
+    location.assign(startUrl);
   }
 
   async redirectToOAuth(
@@ -190,6 +290,10 @@ export class SwigWebSdk {
     return session;
   }
 
+  completeAgentRevokeFromUrl(url?: string | URL): AgentRevokeCallbackResult {
+    return parseAgentRevokeCallbackUrl(url ?? getBrowserLocationHref());
+  }
+
   parseOAuthCallbackUrl(url: string | URL): PersistedSwigSession {
     return parseOAuthCallbackUrl(url);
   }
@@ -207,6 +311,34 @@ export class SwigWebSdk {
 
   async getPersistedSession(): Promise<PersistedSwigSession | null> {
     return this.sessionStore.load();
+  }
+
+  async listAgents(input: {
+    clientId: string;
+    swigPubkey: string;
+    network?: NetworkValue;
+  }): Promise<ListAgentsResponse> {
+    return this.api.listAgents({
+      client_id: input.clientId,
+      swig_pubkey: input.swigPubkey,
+      network: input.network ?? this.network,
+    });
+  }
+
+  async updateAgentReputation(input: {
+    clientId: string;
+    swigPubkey: string;
+    roleId: number;
+    reputationScore: number;
+    network?: NetworkValue;
+  }): Promise<UpdateAgentReputationResponse> {
+    return this.api.updateAgentReputation({
+      client_id: input.clientId,
+      swig_pubkey: input.swigPubkey,
+      network: input.network ?? this.network,
+      role_id: input.roleId,
+      reputation_score: input.reputationScore,
+    });
   }
 
   async logout(): Promise<void> {
@@ -229,7 +361,13 @@ export const createSwigWebClient = (config: SwigWebSdkConfig = {}): SwigWebSdk =
 };
 
 export { Network, parseOAuthCallbackUrl };
-export type { NetworkValue, PersistedSwigSession, SwigBackendEndpoints };
+export type {
+  AgentRevokeCallbackResult,
+  NetworkValue,
+  PersistedSwigSession,
+  SwigBackendEndpoints,
+  UpdateAgentReputationResponse,
+};
 
 const getBrowserLocalStorage = (): Storage => {
   if (typeof window === "undefined" || !window.localStorage) {

@@ -6,11 +6,25 @@ const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 const webSource = readFileSync(new URL("../src/web.ts", import.meta.url), "utf8");
+const revokeStartSource = webSource.slice(
+  webSource.indexOf("async getRevokeAgentStartUrl"),
+  webSource.indexOf("async redirectToRevokeAgent"),
+);
 
 test("package exposes a browser-safe web entry point", () => {
   assert.equal(packageJson.exports["./web"].types, "./dist/web.d.ts");
   assert.equal(packageJson.exports["./web"].import, "./dist/web.js");
   assert.match(webSource, /createSwigWebClient/);
+  assert.match(webSource, /redirectToRevokeAgent/);
+  assert.match(webSource, /completeAgentRevokeFromUrl/);
+});
+
+test("agent revoke starts a direct isolated-host flow without provider auth", () => {
+  assert.match(revokeStartSource, /\/agent\/revoke/);
+  assert.match(revokeStartSource, /swig_pubkey/);
+  assert.match(revokeStartSource, /role_id/);
+  assert.doesNotMatch(revokeStartSource, /getOAuthStartUrl/);
+  assert.doesNotMatch(revokeStartSource, /provider/);
 });
 
 test("web entry point does not import Expo or React Native modules", () => {
