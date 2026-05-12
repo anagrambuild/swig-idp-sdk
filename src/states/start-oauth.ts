@@ -18,6 +18,12 @@ export type StartOAuthInput = {
   flow?: "role" | "session";
   /** Policy ID for role flow */
   policyId?: string;
+  /** Optional Ed25519 public key to add as the role authority. */
+  authorityPublicKey?: string;
+  /** Optional role intent used by One Wallet agent connect. */
+  roleIntent?: "agent";
+  /** Optional agent display name for agent role additions. */
+  agentName?: string;
   /** Solana network (default: Network.Devnet) */
   network: NetworkValue;
 };
@@ -55,6 +61,9 @@ export const runStartOAuthFlow = async ({
     network: input.network,
     flow: input.flow ?? "role",
     ...(input.policyId ? { policy_id: input.policyId } : {}),
+    ...(input.authorityPublicKey ? { authority_public_key: input.authorityPublicKey } : {}),
+    ...(input.roleIntent ? { role_intent: input.roleIntent } : {}),
+    ...(input.agentName ? { agent_name: input.agentName } : {}),
   });
 
   // 2. Build IH /start URL with the trusted token when available.
@@ -67,6 +76,9 @@ export const runStartOAuthFlow = async ({
     clientId: input.clientId,
     ...(startToken ? { startToken } : {}),
     ...(input.policyId ? { policyId: input.policyId } : {}),
+    ...(input.authorityPublicKey ? { authorityPublicKey: input.authorityPublicKey } : {}),
+    ...(input.roleIntent ? { roleIntent: input.roleIntent } : {}),
+    ...(input.agentName ? { agentName: input.agentName } : {}),
   });
 
   // 3. Open a system auth session. Embedded WebViews are intentionally unsupported
