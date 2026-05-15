@@ -16,6 +16,7 @@ import {
 import { bootstrapAuthState } from "./states/bootstrap.js";
 import { type StartEmailOtpInput, runStartEmailOtpFlow } from "./states/start-email-otp.js";
 import { type StartOAuthInput, runStartOAuthFlow } from "./states/start-oauth.js";
+import { type StartSmsOtpInput, runStartSmsOtpFlow } from "./states/start-sms-otp.js";
 import { authMachineReducer, initialAuthMachineState, type SwigAuthPhase } from "./states/states.js";
 import { SwigSessionService } from "./swig-session/session-service.js";
 import { DEFAULT_STORAGE_KEY, type PersistedSwigSession, resolveSwigSessionStore } from "./swig-session/session-store.js";
@@ -66,6 +67,13 @@ export type SwigIdpContextValue = {
    * sees the code or the callback JWT.
    */
   startEmailOtp(input: Omit<StartEmailOtpInput, "network">): Promise<PersistedSwigSession>;
+  /**
+   * All-in-one SMS OTP: opens the IH phone-entry page in a system auth
+   * session and returns the same session payload OAuth and email-OTP do.
+   * The phone number, verification code, and callback JWT all stay inside
+   * the IH; the developer app never sees them.
+   */
+  startSmsOtp(input: Omit<StartSmsOtpInput, "network">): Promise<PersistedSwigSession>;
   /** Lookup providers configured for the current client. */
   listProviders(input: { clientId: string }): Promise<ListProvidersResponse>;
   /** Get persisted session data */
@@ -151,6 +159,25 @@ export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): Rea
     [resolvedConfig.redirectUri, isolatedHostUrl, sessionService],
   );
 
+  const startSmsOtp = useCallback(
+    async (input: Omit<StartSmsOtpInput, "network">) => {
+      if (!resolvedConfig.redirectUri) {
+        throw new Error("redirectUri must be set in SwigIdpConfig to use startSmsOtp");
+      }
+      if (!resolvedConfig.network) {
+        throw new Error("Network not set");
+      }
+      return runStartSmsOtpFlow({
+        input: { ...input, network: resolvedConfig.network },
+        redirectUri: resolvedConfig.redirectUri,
+        isolatedHostUrl,
+        sessionService,
+        dispatch,
+      });
+    },
+    [resolvedConfig.redirectUri, isolatedHostUrl, sessionService],
+  );
+
   const listProviders = useCallback(
     async (input: { clientId: string }): Promise<ListProvidersResponse> => {
       return api.listProviders({ client_id: input.clientId });
@@ -180,6 +207,7 @@ export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): Rea
       authPhase: state.phase,
       startOAuth,
       startEmailOtp,
+      startSmsOtp,
       getSession,
       listProviders,
       logout,
@@ -190,6 +218,7 @@ export function SwigIdpProvider({ config, children }: SwigIdpProviderProps): Rea
       logout,
       startOAuth,
       startEmailOtp,
+      startSmsOtp,
       state.isAuthenticated,
       state.isReady,
       state.phase,
