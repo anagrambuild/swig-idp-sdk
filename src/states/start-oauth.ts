@@ -31,7 +31,7 @@ export type StartOAuthInput = {
 /**
  * All-in-one OAuth flow for mobile.
  *
- * Routes through IH /start → IDP → IH /callback (ZK proof + approval + add_role) → deep link.
+ * Routes through IH /redirect (interstitial) → IDP → IH /callback (ZK proof + approval + add_role) → deep link.
  * The IH handles everything — JWT never leaves the IH domain.
  * Returns session data parsed from the deep link callback.
  */
@@ -66,7 +66,7 @@ export const runStartOAuthFlow = async ({
     ...(input.agentName ? { agent_name: input.agentName } : {}),
   });
 
-  // 2. Build IH /start URL with the trusted token when available.
+  // 2. Build IH /redirect URL with the trusted token when available.
   const ihStartUrl = buildIsolatedHostStartUrl({
     isolatedHostUrl,
     redirectUri,

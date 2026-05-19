@@ -67,7 +67,7 @@ export const buildIsolatedHostStartUrl = ({
     ? isolatedHostUrl.slice(0, -1)
     : isolatedHostUrl;
 
-  return `${normalizedBaseUrl}/start?${startParams.toString()}`;
+  return `${normalizedBaseUrl}/redirect?${startParams.toString()}`;
 };
 
 export const parseOAuthCallbackUrl = (url: string | URL): PersistedSwigSession => {
