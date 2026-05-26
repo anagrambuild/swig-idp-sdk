@@ -103,6 +103,32 @@ function EmailLogin() {
 
 `startEmailOtp` opens the isolated host's email entry page in a system auth session — the user types their address inside the IH, the IH sends the code, and the same OTP entry + verify + callback flow runs from there. The address, the verification code, and the callback JWT never enter the developer app. The function resolves with the same session payload OAuth produces.
 
+### SMS OTP
+
+```tsx
+function SmsLogin() {
+  const { startSmsOtp, authPhase } = useSwigIdp();
+
+  return (
+    <button
+      onClick={async () => {
+        await startSmsOtp({
+          // provider defaults to "sms"; pass an explicit value if a tenant
+          // has registered its own sms-otp provider key.
+          clientId: "your-client-id",
+          policyId: "your-policy-id",
+          flow: "role",
+        });
+      }}
+    >
+      {authPhase === "begin_oauth" ? "Opening browser..." : "Continue with phone"}
+    </button>
+  );
+}
+```
+
+`startSmsOtp` opens the isolated host's phone entry page in a system auth session — the user types their phone number inside the IH, the IH sends the SMS code, and the same OTP entry + verify + callback flow runs from there. The phone number, verification code, and callback JWT never enter the developer app. The function resolves with the same session payload OAuth produces.
+
 ## Web usage
 
 Use the `/web` entry point in browser apps. This path does not import Expo modules.
@@ -153,7 +179,7 @@ Web session persistence defaults to `window.localStorage`. Pass a custom `storag
 - `baseUrl` is optional and defaults to `https://backend.prod.infra.onswig.com`.
 - `isolatedHostUrl` is optional and defaults to `https://swig-dev-portal-isolated-host.vercel.app`.
 - Install `expo-secure-store` in the host Expo/React Native app.
-- High-level public flows are `startOAuth()` and `startEmailOtp()`. Both return the same `PersistedSwigSession` shape.
+- High-level public flows are `startOAuth()`, `startEmailOtp()`, and `startSmsOtp()`. All three return the same `PersistedSwigSession` shape.
 - `transport/api.ts` is a thin 1:1 wrapper over `api_idp.proto` and `api_wallet.proto` HTTP mappings.
 - OAuth start now prefers a backend-issued `start_token` for the isolated host redirect, and falls back to the legacy raw redirect params only when the backend has not been upgraded yet.
 - Mobile auth is intentionally routed through `expo-web-browser` system auth sessions via `openAuthSessionAsync`.
@@ -185,6 +211,7 @@ Web session persistence defaults to `window.localStorage`. Pass a custom `storag
   - `listProviders` -> `/identity/api/providers`
   - `startAuth` -> `/identity/api/auth/start`
   - `startEmailOtp` -> `/identity/api/auth/email/start`
+  - `startSmsOtp` -> `/identity/api/auth/sms/start`
   - `signup` -> `/identity/api/signup`
   - `createSession` -> `/identity/api/session`
   - `lookupSwig` -> `/wallet/swig/lookup`
@@ -195,8 +222,8 @@ Web session persistence defaults to `window.localStorage`. Pass a custom `storag
 
 ## Security boundary
 
-- The SDK's supported mobile auth paths are `startOAuth()` and `startEmailOtp()`. Both open the isolated host in a system auth session.
-- Do not embed the isolated host in a `WebView`. A host app that owns the `WebView` can inspect DOM, URLs, and storage. The OTP code, callback JWT, and user email are all held inside the isolated host on purpose.
+- The SDK's supported mobile auth paths are `startOAuth()`, `startEmailOtp()`, and `startSmsOtp()`. All open the isolated host in a system auth session.
+- Do not embed the isolated host in a `WebView`. A host app that owns the `WebView` can inspect DOM, URLs, and storage. The OTP code, callback JWT, and the user's email or phone number are all held inside the isolated host on purpose.
 - If you need a custom mobile integration, preserve the same boundary: backend start token -> isolated host -> system auth session -> deep link callback.
 
 ## License
