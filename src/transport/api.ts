@@ -62,21 +62,6 @@ export type SignupResponse = {
   signature: string;
 };
 
-export type CreateSessionRequest = {
-  client_id: string;
-  swig_pubkey: string;
-  zk_proof: string;
-  session_key: string;
-  duration: number;
-  network: NetworkValue;
-};
-
-export type CreateSessionResponse = {
-  status: string;
-  role_id: number;
-  signature: string;
-};
-
 export type ListAgentsRequest = {
   client_id: string;
   swig_pubkey: string;
@@ -182,7 +167,6 @@ export type SwigBackendEndpoints = {
   listProviders: string;
   startAuth: string;
   signup: string;
-  createSession: string;
   listAgents: string;
   updateAgentReputation: string;
   removeRole: string;
@@ -197,7 +181,6 @@ const DEFAULT_ENDPOINTS: SwigBackendEndpoints = {
   listProviders: "/identity/api/providers",
   startAuth: "/identity/api/auth/start",
   signup: "/identity/api/signup",
-  createSession: "/identity/api/session",
   listAgents: "/identity/api/agents",
   updateAgentReputation: "/identity/api/agents/reputation",
   removeRole: "/identity/api/role-remove",
@@ -369,10 +352,6 @@ export class SwigApiClient {
 
   signup(input: SignupRequest): Promise<SignupResponse> {
     return this.post<SignupResponse>(this.endpoints.signup, input);
-  }
-
-  createSession(input: CreateSessionRequest): Promise<CreateSessionResponse> {
-    return this.post<CreateSessionResponse>(this.endpoints.createSession, input);
   }
 
   listAgents(input: ListAgentsRequest): Promise<ListAgentsResponse> {

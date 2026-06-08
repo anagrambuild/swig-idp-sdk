@@ -96,7 +96,7 @@ export const parseOAuthCallbackUrl = (url: string | URL): PersistedSwigSession =
     throw new Error("Invalid callback param: role_id must be a number");
   }
   const authFlow = params.get("auth_flow") === "session" ? "session" : "role";
-  const authorityPublicKey = params.get("authority_public_key") ?? params.get("session_key");
+  const authorityPublicKey = params.get("authority_public_key");
 
   const session: PersistedSwigSession = {
     configAddress,
@@ -107,14 +107,6 @@ export const parseOAuthCallbackUrl = (url: string | URL): PersistedSwigSession =
   };
   if (authorityPublicKey) {
     session.authorityPublicKey = authorityPublicKey;
-  }
-  if (authFlow === "session" && authorityPublicKey) {
-    session.requesterAuthority = {
-      programExecSession: {
-        roleId: parsedRoleId,
-        sessionKey: authorityPublicKey,
-      },
-    };
   }
 
   return session;

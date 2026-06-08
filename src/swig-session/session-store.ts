@@ -22,7 +22,7 @@ export type SwigRequesterAuthority =
   | { ed25519: { publicKey: string } }
   | { secp256k1: { publicKey: string } }
   | { secp256r1: { publicKey: string } }
-  | { programExecSession: { roleId: number; sessionKey: string } };
+  | { programExecProof: { roleId: number; zkProof: string } };
 
 class ExpoSecureStoreAdapter implements SessionStorageAdapterLike {
   async getItem(key: string): Promise<string | null> {
