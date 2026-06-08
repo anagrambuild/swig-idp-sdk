@@ -212,7 +212,6 @@ Web session persistence defaults to `window.localStorage`. Pass a custom `storag
   - `startEmailOtp` -> `/identity/api/auth/email/start`
   - `startSmsOtp` -> `/identity/api/auth/sms/start`
   - `signup` -> `/identity/api/signup`
-  - `createSession` -> `/identity/api/session`
   - `lookupSwig` -> `/wallet/swig/lookup`
   - `getSwigStatus` -> `/wallet/swig/status`
   - `checkSwigAuth` -> `/wallet/swig/auth/check`
