@@ -14,6 +14,13 @@ export type PersistedSwigSession = {
   roleId: number;
   authFlow: "session" | "role";
   updatedAt: number;
+  authorityPublicKey?: string;
+  requesterAuthority?: {
+    ed25519?: { publicKey: string };
+    secp256k1?: { publicKey: string };
+    secp256r1?: { publicKey: string };
+    programExecSession?: { roleId: number; sessionKey: string };
+  };
 };
 
 class ExpoSecureStoreAdapter implements SessionStorageAdapterLike {

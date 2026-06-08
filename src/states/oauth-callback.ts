@@ -95,14 +95,29 @@ export const parseOAuthCallbackUrl = (url: string | URL): PersistedSwigSession =
   if (!Number.isFinite(parsedRoleId)) {
     throw new Error("Invalid callback param: role_id must be a number");
   }
+  const authFlow = params.get("auth_flow") === "session" ? "session" : "role";
+  const authorityPublicKey = params.get("authority_public_key") ?? params.get("session_key");
 
-  return {
+  const session: PersistedSwigSession = {
     configAddress,
     walletAddress,
     roleId: parsedRoleId,
-    authFlow: "role",
+    authFlow,
     updatedAt: Date.now(),
   };
+  if (authorityPublicKey) {
+    session.authorityPublicKey = authorityPublicKey;
+  }
+  if (authFlow === "session" && authorityPublicKey) {
+    session.requesterAuthority = {
+      programExecSession: {
+        roleId: parsedRoleId,
+        sessionKey: authorityPublicKey,
+      },
+    };
+  }
+
+  return session;
 };
 
 export const parseAgentRevokeCallbackUrl = (url: string | URL): AgentRevokeCallbackResult => {

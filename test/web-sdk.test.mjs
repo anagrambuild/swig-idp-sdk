@@ -17,6 +17,8 @@ test("package exposes a browser-safe web entry point", () => {
   assert.match(webSource, /createSwigWebClient/);
   assert.match(webSource, /redirectToRevokeAgent/);
   assert.match(webSource, /completeAgentRevokeFromUrl/);
+  assert.match(webSource, /ensureProofSession/);
+  assert.match(webSource, /createSigner/);
 });
 
 test("agent revoke starts a direct isolated-host flow without provider auth", () => {
@@ -32,6 +34,18 @@ test("web entry point does not import Expo or React Native modules", () => {
   assert.doesNotMatch(webSource, /react-native/);
   assert.doesNotMatch(webSource, /from "\.\/provider"/);
   assert.doesNotMatch(webSource, /from "\.\/polyfills"/);
+});
+
+test("web session manager exposes top-level reauth and isolated-host signing boundaries", () => {
+  assert.match(webSource, /SwigProofSessionReauthRequiredError/);
+  assert.match(webSource, /getProofSessionRefreshUrl/);
+  assert.match(webSource, /getTransactionSignUrl/);
+  assert.match(webSource, /\/session\/refresh/);
+  assert.match(webSource, /\/transaction\/sign/);
+  assert.match(webSource, /swig:idp-transaction-sign-ready/);
+  assert.match(webSource, /swig:idp-transaction-sign-result/);
+  assert.doesNotMatch(webSource, /secretKey/);
+  assert.doesNotMatch(webSource, /privateKey/);
 });
 
 test("runtime peer dependencies are optional for web consumers", () => {
