@@ -6,6 +6,10 @@ const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 const webSource = readFileSync(new URL("../src/web.ts", import.meta.url), "utf8");
+const sessionStoreSource = readFileSync(
+  new URL("../src/swig-session/session-store.ts", import.meta.url),
+  "utf8",
+);
 const revokeStartSource = webSource.slice(
   webSource.indexOf("async getRevokeAgentStartUrl"),
   webSource.indexOf("async redirectToRevokeAgent"),
@@ -46,6 +50,14 @@ test("web session manager exposes top-level reauth and isolated-host signing bou
   assert.match(webSource, /swig:idp-transaction-sign-result/);
   assert.doesNotMatch(webSource, /secretKey/);
   assert.doesNotMatch(webSource, /privateKey/);
+});
+
+test("persisted requester authority stores a single signer variant", () => {
+  assert.match(sessionStoreSource, /export type SwigRequesterAuthority =/);
+  assert.match(sessionStoreSource, /\| \{ programExecSession: \{ roleId: number; sessionKey: string \} \}/);
+  assert.match(sessionStoreSource, /requesterAuthority\?: SwigRequesterAuthority/);
+  assert.doesNotMatch(sessionStoreSource, /ed25519\?:/);
+  assert.doesNotMatch(sessionStoreSource, /programExecSession\?:/);
 });
 
 test("runtime peer dependencies are optional for web consumers", () => {

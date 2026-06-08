@@ -15,13 +15,14 @@ export type PersistedSwigSession = {
   authFlow: "session" | "role";
   updatedAt: number;
   authorityPublicKey?: string;
-  requesterAuthority?: {
-    ed25519?: { publicKey: string };
-    secp256k1?: { publicKey: string };
-    secp256r1?: { publicKey: string };
-    programExecSession?: { roleId: number; sessionKey: string };
-  };
+  requesterAuthority?: SwigRequesterAuthority;
 };
+
+export type SwigRequesterAuthority =
+  | { ed25519: { publicKey: string } }
+  | { secp256k1: { publicKey: string } }
+  | { secp256r1: { publicKey: string } }
+  | { programExecSession: { roleId: number; sessionKey: string } };
 
 class ExpoSecureStoreAdapter implements SessionStorageAdapterLike {
   async getItem(key: string): Promise<string | null> {
