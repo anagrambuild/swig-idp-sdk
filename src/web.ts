@@ -17,7 +17,10 @@ import {
   type UpdateAgentReputationResponse,
 } from "./transport/api.js";
 import { Network, type NetworkValue } from "./utils.js";
-import type { PersistedSwigSession } from "./swig-session/session-store.js";
+import type {
+  PersistedSwigSession,
+  SwigRequesterAuthority,
+} from "./swig-session/session-store.js";
 
 export type WebSessionStorageAdapter = {
   getItem(key: string): Promise<string | null>;
@@ -83,6 +86,12 @@ export type ProofSessionOperationResult = {
   requestId: string;
   status: ProofSessionOperationStatus;
   message?: string;
+  session?: {
+    swigPubkey: string;
+    walletAddress?: string;
+    roleId: number;
+    zkProof: string;
+  };
 };
 
 export type ProofSessionOperationInput = {
@@ -102,6 +111,7 @@ export type EnsureProofSessionResult =
       status: "ready";
       session: PersistedSwigSession;
       requestId: string;
+      requesterAuthority?: SwigRequesterAuthority;
     }
   | {
       status: "reauth_required";
@@ -118,6 +128,12 @@ export class SwigProofSessionReauthRequiredError extends Error {
     this.name = "SwigProofSessionReauthRequiredError";
   }
 }
+
+export type FreshRequesterAuthorityResult = {
+  session: PersistedSwigSession;
+  requesterAuthority: SwigRequesterAuthority;
+  requestId: string;
+};
 
 export type IsolatedHostPreparedTransaction = {
   transaction: string;
@@ -476,12 +492,32 @@ export class SwigWebSdk {
     }
 
     if (result.status === "ready") {
-      const refreshedSession = await this.sessionStore.touch();
+      const requesterAuthority = result.session
+        ? {
+            programExecProof: {
+              roleId: result.session.roleId,
+              zkProof: result.session.zkProof,
+            },
+          }
+        : undefined;
+      const refreshedSession = result.session
+        ? {
+            ...session,
+            configAddress: result.session.swigPubkey,
+            walletAddress: result.session.walletAddress ?? session.walletAddress,
+            roleId: result.session.roleId,
+            updatedAt: Date.now(),
+          }
+        : await this.sessionStore.touch();
       if (refreshedSession) {
+        if (result.session) {
+          await this.sessionStore.save(refreshedSession);
+        }
         return {
           status: "ready",
           session: refreshedSession,
           requestId: result.requestId,
+          ...(requesterAuthority ? { requesterAuthority } : {}),
         };
       }
 
@@ -522,6 +558,30 @@ export class SwigWebSdk {
       return result.session;
     }
     throw new SwigProofSessionReauthRequiredError(result);
+  }
+
+  async getFreshRequesterAuthority(
+    input: EnsureProofSessionInput,
+  ): Promise<FreshRequesterAuthorityResult> {
+    const result = await this.ensureProofSession(input);
+    if (result.status !== "ready") {
+      throw new SwigProofSessionReauthRequiredError(result);
+    }
+    if (!result.requesterAuthority) {
+      throw new SwigProofSessionReauthRequiredError({
+        status: "reauth_required",
+        session: result.session,
+        reason: "refresh_failed",
+        refreshUrl: this.getProofSessionRefreshUrl(input),
+        requestId: result.requestId,
+        message: "Swig IdP refresh did not return a signing proof",
+      });
+    }
+    return {
+      session: result.session,
+      requesterAuthority: result.requesterAuthority,
+      requestId: result.requestId,
+    };
   }
 
   createSigner(input: IsolatedHostSignerInput): IsolatedHostSigner {
@@ -629,6 +689,7 @@ export class SwigWebSdk {
           requestId,
           status: event.data.status,
           ...(event.data.message ? { message: event.data.message } : {}),
+          ...(event.data.session ? { session: event.data.session } : {}),
         });
       }
 
@@ -657,91 +718,12 @@ export class SwigWebSdk {
     prepared: IsolatedHostPreparedTransaction,
     input: IsolatedHostSignerInput,
   ): Promise<IsolatedHostSignedTransaction> {
-    const session = await this.requireProofSession(input);
-    const requestId = createRequestId();
-    const url = this.getTransactionSignUrl({
-      ...input,
-      requestId,
-      swigPubkey: input.swigPubkey ?? session.configAddress,
-    });
-    const isolatedHostOrigin = new URL(this.isolatedHostUrl).origin;
-    const browserWindow = getBrowserWindow();
-    const browserDocument = getBrowserDocument();
-
-    return new Promise<IsolatedHostSignedTransaction>((resolve, reject) => {
-      const iframe = browserDocument.createElement("iframe");
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      let sentRequest = false;
-
-      const cleanup = () => {
-        browserWindow.removeEventListener("message", onMessage);
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-        iframe.remove();
-      };
-
-      const fail = (error: Error) => {
-        cleanup();
-        reject(error);
-      };
-
-      const finish = (signed: IsolatedHostSignedTransaction) => {
-        cleanup();
-        resolve(signed);
-      };
-
-      function onMessage(event: MessageEvent) {
-        if (event.origin !== isolatedHostOrigin) {
-          return;
-        }
-
-        if (isTransactionSignReadyMessage(event.data, requestId)) {
-          if (sentRequest || !iframe.contentWindow) {
-            return;
-          }
-          sentRequest = true;
-          iframe.contentWindow.postMessage(
-            {
-              type: TRANSACTION_SIGN_REQUEST_MESSAGE_TYPE,
-              requestId,
-              prepared,
-            },
-            isolatedHostOrigin,
-          );
-          return;
-        }
-
-        const result = parseTransactionSignResultMessage(event.data, requestId);
-        if (!result) {
-          return;
-        }
-        if (result.status === "signed") {
-          finish(result.signed);
-          return;
-        }
-        fail(new Error(result.message ?? "Isolated host failed to sign transaction"));
-      }
-
-      timer = setTimeout(() => {
-        fail(new Error("Timed out waiting for isolated-host transaction signing"));
-      }, input.timeoutMs ?? DEFAULT_PROOF_SESSION_TIMEOUT_MS);
-
-      iframe.src = url;
-      iframe.title = "Swig IdP transaction signer";
-      iframe.tabIndex = -1;
-      iframe.setAttribute("aria-hidden", "true");
-      iframe.style.position = "fixed";
-      iframe.style.width = "1px";
-      iframe.style.height = "1px";
-      iframe.style.opacity = "0";
-      iframe.style.pointerEvents = "none";
-      iframe.style.border = "0";
-
-      browserWindow.addEventListener("message", onMessage);
-      (browserDocument.body ?? browserDocument.documentElement).appendChild(iframe);
-    });
+    await this.requireProofSession(input);
+    return {
+      transaction: prepared.transaction,
+      ...(prepared.transactionEncoding ? { transactionEncoding: prepared.transactionEncoding } : {}),
+      network: prepared.network,
+    };
   }
 
   private resolveRedirectUri(redirectUri?: string): string {
@@ -820,6 +802,7 @@ const isProofSessionOperationMessage = (
   requestId: string;
   status: ProofSessionOperationStatus;
   message?: string;
+  session?: ProofSessionOperationResult["session"];
 } => {
   if (!data || typeof data !== "object") {
     return false;
@@ -830,6 +813,7 @@ const isProofSessionOperationMessage = (
     requestId?: unknown;
     status?: unknown;
     message?: unknown;
+    session?: unknown;
   };
 
   return (
@@ -839,7 +823,30 @@ const isProofSessionOperationMessage = (
       payload.status === "expired" ||
       payload.status === "signed_out" ||
       payload.status === "error") &&
-    (payload.message === undefined || typeof payload.message === "string")
+    (payload.message === undefined || typeof payload.message === "string") &&
+    (payload.session === undefined || isProofSessionMetadata(payload.session))
+  );
+};
+
+const isProofSessionMetadata = (
+  value: unknown,
+): value is NonNullable<ProofSessionOperationResult["session"]> => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const session = value as {
+    swigPubkey?: unknown;
+    walletAddress?: unknown;
+    roleId?: unknown;
+    zkProof?: unknown;
+  };
+  return (
+    typeof session.swigPubkey === "string" &&
+    (session.walletAddress === undefined || typeof session.walletAddress === "string") &&
+    typeof session.roleId === "number" &&
+    Number.isFinite(session.roleId) &&
+    typeof session.zkProof === "string" &&
+    session.zkProof.length > 0
   );
 };
 

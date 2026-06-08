@@ -188,9 +188,8 @@ Web session persistence defaults to `window.localStorage`. Pass a custom `storag
   - `proof/proof-pipeline.ts`
   - `swig-session/session-service.ts`
   - `states/complete-auth.ts`
-- `completeAuth()` accepts either:
-  - signup shape (`client_id`, `network`, `zk_proof`) or
-  - session shape (`client_id`, `network`, `zk_proof`, `swig_pubkey`, `session_key`, `duration`)
+- `completeAuth()` accepts the signup shape (`client_id`, `network`, `zk_proof`).
+- Proof refreshes return transient `ProgramExecProof` requester authority metadata and do not create session-key roles.
 - Auth phases:
   - `start`
   - `begin_oauth`

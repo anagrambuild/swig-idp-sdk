@@ -52,12 +52,13 @@ test("web session manager exposes top-level reauth and isolated-host signing bou
   assert.doesNotMatch(webSource, /privateKey/);
 });
 
-test("persisted requester authority stores a single signer variant", () => {
+test("persisted requester authority stores the ProgramExec proof variant", () => {
   assert.match(sessionStoreSource, /export type SwigRequesterAuthority =/);
-  assert.match(sessionStoreSource, /\| \{ programExecSession: \{ roleId: number; sessionKey: string \} \}/);
+  assert.match(sessionStoreSource, /\| \{ programExecProof: \{ roleId: number; zkProof: string \} \}/);
   assert.match(sessionStoreSource, /requesterAuthority\?: SwigRequesterAuthority/);
   assert.doesNotMatch(sessionStoreSource, /ed25519\?:/);
   assert.doesNotMatch(sessionStoreSource, /programExecSession\?:/);
+  assert.doesNotMatch(sessionStoreSource, /sessionKey/);
 });
 
 test("runtime peer dependencies are optional for web consumers", () => {

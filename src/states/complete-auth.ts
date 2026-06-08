@@ -3,7 +3,7 @@ import type {
   PersistableAuthResult,
   SwigSessionService,
 } from "../swig-session/session-service.js";
-import type { SwigApiClient, CreateSessionRequest } from "../transport/api.js";
+import type { SwigApiClient } from "../transport/api.js";
 import type { NetworkValue } from "../utils.js";
 import type { AuthDispatch } from "./states.js";
 
@@ -12,9 +12,6 @@ export type CompleteAuthInput = {
   network: NetworkValue;
   zk_proof?: string;
   proof_payload?: Record<string, unknown>;
-  swig_pubkey?: CreateSessionRequest["swig_pubkey"];
-  session_key?: CreateSessionRequest["session_key"];
-  duration?: CreateSessionRequest["duration"];
 };
 
 export type CompleteAuthOutput = PersistableAuthResult;
@@ -74,16 +71,11 @@ export const runCompleteAuthFlow = async ({
     dispatch({ type: "END_PROOF" });
 
     dispatch({ type: "BEGIN_SESSION_EXCHANGE" });
-    const result = hasSessionFields(input)
-      ? await completeWithSessionPath(api, {
-          ...input,
-          zk_proof: zkProof,
-        })
-      : await completeWithSignupPath(api, {
-          client_id: input.client_id,
-          network: input.network,
-          zk_proof: zkProof,
-        });
+    const result = await completeWithSignupPath(api, {
+      client_id: input.client_id,
+      network: input.network,
+      zk_proof: zkProof,
+    });
 
     dispatch({ type: "SWIG_PROGRAM_SESSION_STARTED" });
     await sessionService.persistFromCompleteAuth(result);
@@ -97,17 +89,6 @@ export const runCompleteAuthFlow = async ({
     });
     throw error;
   }
-};
-
-const hasSessionFields = (
-  input: CompleteAuthInput,
-): input is CompleteAuthInput &
-  Required<Pick<CreateSessionRequest, "swig_pubkey" | "session_key" | "duration">> => {
-  return (
-    input.swig_pubkey !== undefined &&
-    input.session_key !== undefined &&
-    input.duration !== undefined
-  );
 };
 
 const completeWithSignupPath = async (
@@ -126,29 +107,5 @@ const completeWithSignupPath = async (
     signature: response.signature,
     swig_pubkey: response.swig_pubkey,
     wallet_address: response.wallet_address,
-  };
-};
-
-const completeWithSessionPath = async (
-  api: SwigApiClient,
-  input: CompleteAuthInput &
-    Required<Pick<CreateSessionRequest, "swig_pubkey" | "session_key" | "duration">> & {
-      zk_proof: string;
-    },
-): Promise<CompleteAuthOutput> => {
-  const response = await api.createSession({
-    client_id: input.client_id,
-    swig_pubkey: input.swig_pubkey,
-    zk_proof: input.zk_proof,
-    session_key: input.session_key,
-    duration: input.duration,
-    network: input.network,
-  });
-
-  return {
-    flow: "session",
-    status: response.status,
-    signature: response.signature,
-    role_id: response.role_id,
   };
 };
