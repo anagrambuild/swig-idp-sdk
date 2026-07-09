@@ -6,6 +6,10 @@ const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 const webSource = readFileSync(new URL("../src/web.ts", import.meta.url), "utf8");
+const embeddedSource = readFileSync(
+  new URL("../src/embedded.ts", import.meta.url),
+  "utf8",
+);
 const sessionStoreSource = readFileSync(
   new URL("../src/swig-session/session-store.ts", import.meta.url),
   "utf8",
@@ -46,10 +50,20 @@ test("web session manager exposes top-level reauth and isolated-host signing bou
   assert.match(webSource, /getTransactionSignUrl/);
   assert.match(webSource, /\/session\/refresh/);
   assert.match(webSource, /\/transaction\/sign/);
-  assert.match(webSource, /swig:idp-transaction-sign-ready/);
-  assert.match(webSource, /swig:idp-transaction-sign-result/);
   assert.doesNotMatch(webSource, /secretKey/);
   assert.doesNotMatch(webSource, /privateKey/);
+});
+
+test("incoming isolated-host messages are bound to the exact origin and window", () => {
+  // Origin is compared by exact parsed origin, never a prefix/startsWith match.
+  assert.match(webSource, /new URL\(this\.isolatedHostUrl\)\.origin/);
+  assert.doesNotMatch(webSource, /isolatedHostUrl\.startsWith/);
+  // The proof-session listener (carries the zkProof) binds to the exact iframe.
+  assert.match(webSource, /event\.source !== iframe\.contentWindow/);
+  // waitForGrantAccessResult optionally binds to the caller-provided frame.
+  assert.match(webSource, /input\.frame && event\.source !== input\.frame\.contentWindow/);
+  // The retired proof-in-URL redirect path stays gone.
+  assert.doesNotMatch(webSource, /parseProofSessionRefreshCallbackUrl/);
 });
 
 test("persisted requester authority stores the ProgramExec proof variant", () => {
@@ -61,8 +75,20 @@ test("persisted requester authority stores the ProgramExec proof variant", () =>
   assert.doesNotMatch(sessionStoreSource, /sessionKey/);
 });
 
+test("the web SDK bundle is free of heavy on-chain dependencies", () => {
+  // @solana/web3.js + @swig-wallet/classic must not enter the /web or
+  // /web/react bundle. On-chain role reads are the consuming app's job.
+  for (const source of [webSource, embeddedSource]) {
+    assert.doesNotMatch(source, /@solana\/web3\.js/);
+    assert.doesNotMatch(source, /@swig-wallet\/classic/);
+    assert.doesNotMatch(source, /onchain|fetchSwigRoles|getOnChainRoles/);
+  }
+  // And they are no longer declared as (optional) peers.
+  assert.equal(packageJson.peerDependencies?.["@solana/web3.js"], undefined);
+  assert.equal(packageJson.peerDependencies?.["@swig-wallet/classic"], undefined);
+});
+
 test("runtime peer dependencies are optional for web consumers", () => {
-  assert.equal(packageJson.peerDependenciesMeta["@swig-wallet/classic"].optional, true);
   assert.equal(packageJson.peerDependenciesMeta["expo-crypto"].optional, true);
   assert.equal(packageJson.peerDependenciesMeta["expo-secure-store"].optional, true);
   assert.equal(packageJson.peerDependenciesMeta["expo-web-browser"].optional, true);
