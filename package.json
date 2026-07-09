@@ -14,6 +14,10 @@
     "./web": {
       "types": "./dist/web.d.ts",
       "import": "./dist/web.js"
+    },
+    "./web/react": {
+      "types": "./dist/web-react.d.ts",
+      "import": "./dist/web-react.js"
     }
   },
   "files": [
@@ -28,7 +32,6 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@swig-wallet/classic": "^1.7.0",
     "expo-crypto": "*",
     "expo-secure-store": "*",
     "expo-web-browser": "*",
@@ -36,9 +39,6 @@
     "react-native": "*"
   },
   "peerDependenciesMeta": {
-    "@swig-wallet/classic": {
-      "optional": true
-    },
     "expo-crypto": {
       "optional": true
     },

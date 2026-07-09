@@ -102,6 +102,27 @@ export type UpdateAgentReputationResponse = {
   reputationScore?: number;
 };
 
+export type GrantAccessApiRequest = {
+  client_id: string;
+  swig_pubkey: string;
+  authority_public_key: string;
+  network: NetworkValue;
+  actions?: Record<string, unknown>[];
+  initiator_zk_proof: string;
+};
+
+/** Field names vary by transcoder config; both casings are populated defensively. */
+export type GrantAccessApiResponse = {
+  status?: string;
+  swig_pubkey?: string;
+  swigPubkey?: string;
+  wallet_address?: string;
+  walletAddress?: string;
+  role_id?: number;
+  roleId?: number;
+  signature?: string;
+};
+
 export type RemoveRoleRequest = {
   client_id: string;
   zk_proof: string;
@@ -157,10 +178,14 @@ export type CreateSwigSessionResponse = {
 
 export type GetPolicyRequest = {
   policy_id: string;
+  client_id: string;
 };
 
 export type GetPolicyResponse = {
-  policy_json: string;
+  id: string;
+  name: string;
+  authority?: { type?: string; publicKey?: string };
+  actions?: Record<string, unknown>[];
 };
 
 export type SwigBackendEndpoints = {
@@ -169,6 +194,7 @@ export type SwigBackendEndpoints = {
   signup: string;
   listAgents: string;
   updateAgentReputation: string;
+  grantAccess: string;
   removeRole: string;
   lookupSwig: string;
   getSwigStatus: string;
@@ -183,12 +209,13 @@ const DEFAULT_ENDPOINTS: SwigBackendEndpoints = {
   signup: "/identity/api/signup",
   listAgents: "/identity/api/agents",
   updateAgentReputation: "/identity/api/agents/reputation",
+  grantAccess: "/identity/api/grant-access",
   removeRole: "/identity/api/role-remove",
   lookupSwig: "/wallet/swig/lookup",
   getSwigStatus: "/wallet/swig/status",
   checkSwigAuth: "/wallet/swig/auth/check",
   createSwigSession: "/wallet/swig/session",
-  getPolicy: "/wallet/policies/{policy_id}",
+  getPolicy: "/identity/api/policy/{policy_id}/client/{client_id}",
 };
 
 const joinUrl = (baseUrl: string, path: string): string => {
@@ -262,7 +289,9 @@ export class SwigApiClient {
   private readonly endpoints: SwigBackendEndpoints;
 
   constructor(private readonly config: SwigApiClientConfig) {
-    this.fetchImpl = config.fetch ?? fetch;
+    // Wrap the global fetch so it keeps its window binding in browsers,
+    // where calling a detached fetch throws "Illegal invocation".
+    this.fetchImpl = config.fetch ?? ((input, init) => fetch(input, init));
     this.endpoints = {
       ...DEFAULT_ENDPOINTS,
       ...config.endpoints,
@@ -367,6 +396,10 @@ export class SwigApiClient {
     );
   }
 
+  grantAccess(input: GrantAccessApiRequest): Promise<GrantAccessApiResponse> {
+    return this.post<GrantAccessApiResponse>(this.endpoints.grantAccess, input);
+  }
+
   removeRole(input: RemoveRoleRequest): Promise<RemoveRoleResponse> {
     return this.post<RemoveRoleResponse>(this.endpoints.removeRole, input);
   }
@@ -389,10 +422,9 @@ export class SwigApiClient {
   }
 
   getPolicy(input: GetPolicyRequest): Promise<GetPolicyResponse> {
-    const path = this.endpoints.getPolicy.replace(
-      "{policy_id}",
-      encodeURIComponent(input.policy_id),
-    );
+    const path = this.endpoints.getPolicy
+      .replace("{policy_id}", encodeURIComponent(input.policy_id))
+      .replace("{client_id}", encodeURIComponent(input.client_id));
     return this.get<GetPolicyResponse>(path);
   }
 }

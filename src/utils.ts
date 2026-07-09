@@ -11,3 +11,12 @@ export const Network = {
 } as const;
 
 export type NetworkValue = (typeof Network)[keyof typeof Network];
+
+/** Unguessable correlation id for postMessage request/response pairing. */
+export const createRequestId = (): string => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};

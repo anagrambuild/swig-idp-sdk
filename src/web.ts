@@ -11,12 +11,14 @@ import {
 } from "./states/oauth-callback.js";
 import {
   SwigApiClient,
+  type AgentInfo,
+  type GetPolicyResponse,
   type ListAgentsResponse,
   type ListProvidersResponse,
   type SwigBackendEndpoints,
   type UpdateAgentReputationResponse,
 } from "./transport/api.js";
-import { Network, type NetworkValue } from "./utils.js";
+import { createRequestId, Network, type NetworkValue } from "./utils.js";
 import type {
   PersistedSwigSession,
   SwigRequesterAuthority,
@@ -157,6 +159,57 @@ export type IsolatedHostSigner = {
   ): Promise<IsolatedHostSignedTransaction>;
 };
 
+export type GrantAccessInput = {
+  /** Developer's client ID */
+  clientId: string;
+  /** Swig config public key the role is added to. */
+  swigPubkey: string;
+  /** Ed25519 public key granted the new role. */
+  authorityPublicKey: string;
+  /** Optional action payloads for the granted role (backend defaults apply when omitted). */
+  actions?: Record<string, unknown>[];
+  /** Optional per-request redirect URI override; its origin anchors the IH referrer check. */
+  redirectUri?: string;
+  /** Optional per-request network override */
+  network?: NetworkValue;
+};
+
+export type GrantAccessResult = {
+  status: string;
+  swigPubkey: string;
+  walletAddress: string;
+  roleId: number;
+  authorityPublicKey: string;
+  signature?: string;
+};
+
+export type GrantAccessFrameOutcome =
+  | { status: "granted"; grant: GrantAccessResult }
+  | { status: "reauth_required"; message?: string }
+  | { status: "error"; message?: string };
+
+/** Grant a role by calling the identity API directly with a proof from ensureProofSession. */
+export type GrantAccessWithProofInput = {
+  clientId: string;
+  swigPubkey: string;
+  authorityPublicKey: string;
+  actions?: Record<string, unknown>[];
+  network?: NetworkValue;
+  zkProof: string;
+};
+
+export type RemoveRoleWithProofInput = {
+  clientId: string;
+  roleId: number;
+  network?: NetworkValue;
+  zkProof: string;
+};
+
+export type RemoveRoleResult = {
+  status: string;
+  signature?: string;
+};
+
 export type RevokeAgentInput = {
   /** Developer's client ID */
   clientId: string;
@@ -180,9 +233,7 @@ const DEFAULT_STORAGE_KEY = "swig.idp.session";
 const DEFAULT_SESSION_TTL_MS = 60 * 60 * 1000;
 const DEFAULT_PROOF_SESSION_TIMEOUT_MS = 10_000;
 const PROOF_SESSION_MESSAGE_TYPE = "swig:idp-session-refresh";
-const TRANSACTION_SIGN_READY_MESSAGE_TYPE = "swig:idp-transaction-sign-ready";
-const TRANSACTION_SIGN_REQUEST_MESSAGE_TYPE = "swig:idp-transaction-sign";
-const TRANSACTION_SIGN_RESULT_MESSAGE_TYPE = "swig:idp-transaction-sign-result";
+const GRANT_ACCESS_RESULT_MESSAGE_TYPE = "swig:idp-grant-access-result";
 
 class BrowserLocalStorageAdapter implements WebSessionStorageAdapter {
   async getItem(key: string): Promise<string | null> {
@@ -280,6 +331,10 @@ export class SwigWebSdk {
     return this.api.listProviders({ client_id: input.clientId });
   }
 
+  async getPolicy(input: { policyId: string; clientId: string }): Promise<GetPolicyResponse> {
+    return this.api.getPolicy({ policy_id: input.policyId, client_id: input.clientId });
+  }
+
   async getOAuthStartUrl(input: StartWebOAuthInput): Promise<string> {
     const redirectUri = this.resolveRedirectUri(input.redirectUri);
     const flow = input.flow ?? "role";
@@ -335,12 +390,131 @@ export class SwigWebSdk {
     location.assign(startUrl);
   }
 
-  async getRevokeAgentStartUrl(input: RevokeAgentInput): Promise<string> {
-    const redirectUri = this.resolveRedirectUri(input.redirectUri);
-    const normalizedBaseUrl = this.isolatedHostUrl.endsWith("/")
+  /** Isolated-host URL for `path`, tolerating a trailing slash in the base. */
+  private ihUrl(path: string): URL {
+    const base = this.isolatedHostUrl.endsWith("/")
       ? this.isolatedHostUrl.slice(0, -1)
       : this.isolatedHostUrl;
-    const url = new URL(`${normalizedBaseUrl}/agent/revoke`);
+    return new URL(`${base}${path}`);
+  }
+
+  private buildGrantAccessUrl(
+    path: string,
+    input: GrantAccessInput,
+    requestId?: string,
+  ): string {
+    const redirectUri = this.resolveRedirectUri(input.redirectUri);
+    const url = this.ihUrl(path);
+
+    url.searchParams.set("client_id", input.clientId);
+    url.searchParams.set("swig_pubkey", input.swigPubkey);
+    url.searchParams.set("authority_public_key", input.authorityPublicKey);
+    url.searchParams.set("redirect_uri", redirectUri);
+    if (requestId !== undefined) {
+      url.searchParams.set("request_id", requestId);
+    }
+    url.searchParams.set("network", String(input.network ?? this.network));
+    if (input.actions) {
+      url.searchParams.set("actions", encodeBase64Url(JSON.stringify(input.actions)));
+    }
+
+    return url.toString();
+  }
+
+  getGrantAccessStartUrl(input: GrantAccessInput): string {
+    return this.buildGrantAccessUrl("/grant/access", input);
+  }
+
+  redirectToGrantAccess(input: GrantAccessInput, options: RedirectToOAuthOptions = {}): void {
+    const startUrl = this.getGrantAccessStartUrl(input);
+    const location = options.location ?? getBrowserLocation();
+
+    if (options.mode === "replace") {
+      location.replace(startUrl);
+      return;
+    }
+
+    location.assign(startUrl);
+  }
+
+  /**
+   * Builds the IH /grant/access/frame URL for embedding in an iframe the app
+   * renders itself (visible approval UI). Pair with waitForGrantAccessResult
+   * using the same requestId.
+   */
+  getGrantAccessFrameUrl(input: GrantAccessInput & { requestId?: string }): string {
+    return this.buildGrantAccessUrl(
+      "/grant/access/frame",
+      input,
+      input.requestId ?? createRequestId(),
+    );
+  }
+
+  createGrantAccessRequestId(): string {
+    return createRequestId();
+  }
+
+  /**
+   * Resolves with the isolated host's grant outcome for the given requestId.
+   * Origin-checked against the configured isolated host. The caller owns the
+   * iframe (or other surface) that loads the matching frame URL; pass that
+   * `frame` to also bind the result to its exact window (event.source) —
+   * defense-in-depth beyond the origin + requestId checks.
+   */
+  waitForGrantAccessResult(input: {
+    requestId: string;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    frame?: HTMLIFrameElement | null;
+  }): Promise<GrantAccessFrameOutcome> {
+    const isolatedHostOrigin = new URL(this.isolatedHostUrl).origin;
+    const browserWindow = getBrowserWindow();
+
+    return new Promise<GrantAccessFrameOutcome>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        browserWindow.removeEventListener("message", onMessage);
+        input.signal?.removeEventListener("abort", onAbort);
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      };
+
+      function onAbort() {
+        cleanup();
+        reject(new Error("Grant access request aborted"));
+      }
+
+      function onMessage(event: MessageEvent) {
+        if (event.origin !== isolatedHostOrigin) {
+          return;
+        }
+        if (input.frame && event.source !== input.frame.contentWindow) {
+          return;
+        }
+        const result = parseGrantAccessResultMessage(event.data, input.requestId);
+        if (!result) {
+          return;
+        }
+        cleanup();
+        resolve(result);
+      }
+
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("Timed out waiting for isolated-host grant access"));
+      }, input.timeoutMs ?? DEFAULT_PROOF_SESSION_TIMEOUT_MS);
+
+      input.signal?.addEventListener("abort", onAbort);
+      browserWindow.addEventListener("message", onMessage);
+    });
+  }
+
+  async getRevokeAgentStartUrl(input: RevokeAgentInput): Promise<string> {
+    const redirectUri = this.resolveRedirectUri(input.redirectUri);
+    const url = this.ihUrl("/agent/revoke");
 
     url.searchParams.set("client_id", input.clientId);
     url.searchParams.set("redirect_uri", redirectUri);
@@ -431,10 +605,7 @@ export class SwigWebSdk {
     },
   ): string {
     const redirectUri = this.resolveRedirectUri(input.redirectUri);
-    const normalizedBaseUrl = this.isolatedHostUrl.endsWith("/")
-      ? this.isolatedHostUrl.slice(0, -1)
-      : this.isolatedHostUrl;
-    const url = new URL(`${normalizedBaseUrl}/session/refresh`);
+    const url = this.ihUrl("/session/refresh");
 
     url.searchParams.set("client_id", input.clientId);
     url.searchParams.set("redirect_uri", redirectUri);
@@ -452,6 +623,46 @@ export class SwigWebSdk {
     input: ProofSessionOperationInput,
   ): Promise<ProofSessionOperationResult> {
     return this.runProofSessionOperation({ ...input, mode: "refresh" });
+  }
+
+  /** Calls the identity grant-access API with an initiator proof; returns the new role. */
+  async grantAccess(input: GrantAccessWithProofInput): Promise<GrantAccessResult> {
+    const response = await this.api.grantAccess({
+      client_id: input.clientId,
+      swig_pubkey: input.swigPubkey,
+      authority_public_key: input.authorityPublicKey,
+      network: input.network ?? this.network,
+      ...(input.actions ? { actions: input.actions } : {}),
+      initiator_zk_proof: input.zkProof,
+    });
+
+    const roleId = response.role_id ?? response.roleId;
+    if (typeof roleId !== "number" || !Number.isFinite(roleId)) {
+      throw new Error("Swig grant-access response did not include a role id");
+    }
+
+    return {
+      status: response.status ?? "granted",
+      swigPubkey: response.swig_pubkey ?? response.swigPubkey ?? input.swigPubkey,
+      walletAddress: response.wallet_address ?? response.walletAddress ?? "",
+      roleId,
+      authorityPublicKey: input.authorityPublicKey,
+      ...(response.signature ? { signature: response.signature } : {}),
+    };
+  }
+
+  /** Calls the identity role-remove API with an initiator proof. */
+  async removeRole(input: RemoveRoleWithProofInput): Promise<RemoveRoleResult> {
+    const response = await this.api.removeRole({
+      client_id: input.clientId,
+      zk_proof: input.zkProof,
+      role_id: input.roleId,
+      network: input.network ?? this.network,
+    });
+    return {
+      status: response.status,
+      ...(response.signature ? { signature: response.signature } : {}),
+    };
   }
 
   async clearProofSession(input: ProofSessionOperationInput): Promise<ProofSessionOperationResult> {
@@ -598,10 +809,7 @@ export class SwigWebSdk {
     },
   ): string {
     const redirectUri = this.resolveRedirectUri(input.redirectUri);
-    const normalizedBaseUrl = this.isolatedHostUrl.endsWith("/")
-      ? this.isolatedHostUrl.slice(0, -1)
-      : this.isolatedHostUrl;
-    const url = new URL(`${normalizedBaseUrl}/transaction/sign`);
+    const url = this.ihUrl("/transaction/sign");
 
     url.searchParams.set("client_id", input.clientId);
     url.searchParams.set("redirect_uri", redirectUri);
@@ -681,6 +889,11 @@ export class SwigWebSdk {
         if (event.origin !== isolatedHostOrigin) {
           return;
         }
+        // Only accept the response from the exact iframe we created — not any
+        // other window that happens to sit on the isolated-host origin.
+        if (event.source !== iframe.contentWindow) {
+          return;
+        }
         if (!isProofSessionOperationMessage(event.data, requestId)) {
           return;
         }
@@ -741,9 +954,23 @@ export const createSwigWebClient = (config: SwigWebSdkConfig = {}): SwigWebSdk =
   return new SwigWebSdk(config);
 };
 
+export {
+  SwigEmbedded,
+  SwigEmbeddedError,
+  connectSwigEmbedded,
+} from "./embedded.js";
+export type {
+  EmbeddedSession,
+  EmbeddedUiState,
+  RoleOperationResult,
+  SwigEmbeddedConfig,
+} from "./embedded.js";
+
 export { Network, parseOAuthCallbackUrl };
 export type {
+  AgentInfo,
   AgentRevokeCallbackResult,
+  ListAgentsResponse,
   NetworkValue,
   PersistedSwigSession,
   SwigBackendEndpoints,
@@ -784,14 +1011,6 @@ const getBrowserDocument = (): Document => {
   }
 
   return document;
-};
-
-const createRequestId = (): string => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
 const isProofSessionOperationMessage = (
@@ -850,33 +1069,19 @@ const isProofSessionMetadata = (
   );
 };
 
-const isTransactionSignReadyMessage = (
-  data: unknown,
-  requestId: string,
-): data is {
-  type: typeof TRANSACTION_SIGN_READY_MESSAGE_TYPE;
-  requestId: string;
-} => {
-  if (!data || typeof data !== "object") {
-    return false;
+const encodeBase64Url = (value: string): string => {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
   }
-  const payload = data as { type?: unknown; requestId?: unknown };
-  return payload.type === TRANSACTION_SIGN_READY_MESSAGE_TYPE && payload.requestId === requestId;
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
 
-const parseTransactionSignResultMessage = (
+const parseGrantAccessResultMessage = (
   data: unknown,
   requestId: string,
-):
-  | {
-      status: "signed";
-      signed: IsolatedHostSignedTransaction;
-    }
-  | {
-      status: "error";
-      message?: string;
-    }
-  | null => {
+): GrantAccessFrameOutcome | null => {
   if (!data || typeof data !== "object") {
     return null;
   }
@@ -884,37 +1089,45 @@ const parseTransactionSignResultMessage = (
     type?: unknown;
     requestId?: unknown;
     status?: unknown;
-    signed?: unknown;
+    grant?: unknown;
     message?: unknown;
   };
-  if (payload.type !== TRANSACTION_SIGN_RESULT_MESSAGE_TYPE || payload.requestId !== requestId) {
+  if (payload.type !== GRANT_ACCESS_RESULT_MESSAGE_TYPE || payload.requestId !== requestId) {
     return null;
   }
-  if (payload.status === "signed" && isSignedTransaction(payload.signed)) {
-    return { status: "signed", signed: payload.signed };
+  const message = typeof payload.message === "string" ? { message: payload.message } : {};
+  if (payload.status === "granted" && isGrantAccessResult(payload.grant)) {
+    return { status: "granted", grant: payload.grant };
+  }
+  if (payload.status === "reauth_required") {
+    return { status: "reauth_required", ...message };
   }
   if (payload.status === "error") {
-    return {
-      status: "error",
-      ...(typeof payload.message === "string" ? { message: payload.message } : {}),
-    };
+    return { status: "error", ...message };
   }
-  return {
-    status: "error",
-    message: "Invalid isolated-host signing response",
-  };
+  return { status: "error", message: "Invalid isolated-host grant access response" };
 };
 
-const isSignedTransaction = (value: unknown): value is IsolatedHostSignedTransaction => {
+const isGrantAccessResult = (value: unknown): value is GrantAccessResult => {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const signed = value as {
-    transaction?: unknown;
-    transactionEncoding?: unknown;
+  const grant = value as {
+    status?: unknown;
+    swigPubkey?: unknown;
+    walletAddress?: unknown;
+    roleId?: unknown;
+    authorityPublicKey?: unknown;
+    signature?: unknown;
   };
   return (
-    typeof signed.transaction === "string" &&
-    (signed.transactionEncoding === undefined || typeof signed.transactionEncoding === "string")
+    typeof grant.status === "string" &&
+    typeof grant.swigPubkey === "string" &&
+    typeof grant.walletAddress === "string" &&
+    typeof grant.roleId === "number" &&
+    Number.isFinite(grant.roleId) &&
+    typeof grant.authorityPublicKey === "string" &&
+    (grant.signature === undefined || typeof grant.signature === "string")
   );
 };
+
