@@ -14,6 +14,7 @@ export type PersistedSwigSession = {
   roleId: number;
   authFlow: "session" | "role";
   updatedAt: number;
+  expiresAt?: number;
   authorityPublicKey?: string;
   requesterAuthority?: SwigRequesterAuthority;
 };

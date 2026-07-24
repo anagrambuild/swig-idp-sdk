@@ -97,6 +97,22 @@ export const parseOAuthCallbackUrl = (url: string | URL): PersistedSwigSession =
   }
   const authFlow = params.get("auth_flow") === "session" ? "session" : "role";
   const authorityPublicKey = params.get("authority_public_key");
+  const sessionExpiresAt = params.get("session_expires_at");
+
+  if (authFlow === "session" && !authorityPublicKey) {
+    throw new Error("Missing required session callback param: authority_public_key");
+  }
+  if (authFlow === "session" && !sessionExpiresAt) {
+    throw new Error("Missing required session callback param: session_expires_at");
+  }
+
+  const expiresAt = sessionExpiresAt ? Number(sessionExpiresAt) : undefined;
+  if (
+    expiresAt !== undefined &&
+    (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now())
+  ) {
+    throw new Error("Invalid callback param: session_expires_at must be a future timestamp");
+  }
 
   const session: PersistedSwigSession = {
     configAddress,
@@ -104,10 +120,9 @@ export const parseOAuthCallbackUrl = (url: string | URL): PersistedSwigSession =
     roleId: parsedRoleId,
     authFlow,
     updatedAt: Date.now(),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+    ...(authorityPublicKey ? { authorityPublicKey } : {}),
   };
-  if (authorityPublicKey) {
-    session.authorityPublicKey = authorityPublicKey;
-  }
 
   return session;
 };

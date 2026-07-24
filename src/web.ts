@@ -137,13 +137,13 @@ export type FreshRequesterAuthorityResult = {
 
 export type IsolatedHostPreparedTransaction = {
   transaction: string;
-  transactionEncoding?: string;
+  transactionEncoding?: "base64";
   network?: unknown;
 };
 
 export type IsolatedHostSignedTransaction = {
   transaction: string;
-  transactionEncoding?: string;
+  transactionEncoding?: "base64";
   network?: unknown;
 };
 
@@ -183,6 +183,7 @@ const PROOF_SESSION_MESSAGE_TYPE = "swig:idp-session-refresh";
 const TRANSACTION_SIGN_READY_MESSAGE_TYPE = "swig:idp-transaction-sign-ready";
 const TRANSACTION_SIGN_REQUEST_MESSAGE_TYPE = "swig:idp-transaction-sign";
 const TRANSACTION_SIGN_RESULT_MESSAGE_TYPE = "swig:idp-transaction-sign-result";
+const TRANSACTION_SIGN_POPUP_FEATURES = "popup,width=480,height=720";
 
 class BrowserLocalStorageAdapter implements WebSessionStorageAdapter {
   async getItem(key: string): Promise<string | null> {
@@ -221,6 +222,15 @@ class WebSessionStore {
       if (
         !Number.isFinite(session.updatedAt) ||
         Date.now() - session.updatedAt >= this.sessionTtlMs
+      ) {
+        await this.clear();
+        return null;
+      }
+      if (
+        session.authFlow === "session" &&
+        (!session.authorityPublicKey ||
+          !Number.isSafeInteger(session.expiresAt) ||
+          (session.expiresAt ?? 0) <= Date.now())
       ) {
         await this.clear();
         return null;
@@ -718,12 +728,129 @@ export class SwigWebSdk {
     prepared: IsolatedHostPreparedTransaction,
     input: IsolatedHostSignerInput,
   ): Promise<IsolatedHostSignedTransaction> {
-    await this.requireProofSession(input);
-    return {
-      transaction: prepared.transaction,
-      ...(prepared.transactionEncoding ? { transactionEncoding: prepared.transactionEncoding } : {}),
-      network: prepared.network,
-    };
+    if (!prepared.transaction || prepared.transactionEncoding !== "base64") {
+      throw new Error("Isolated-host signing requires a base64 Solana transaction");
+    }
+
+    const requestId = createRequestId();
+    const isolatedHostOrigin = new URL(this.isolatedHostUrl).origin;
+    const browserWindow = getBrowserWindow();
+    const popup = browserWindow.open(
+      "",
+      `swig-idp-transaction-sign-${requestId}`,
+      TRANSACTION_SIGN_POPUP_FEATURES,
+    );
+    if (!popup) {
+      throw new Error("Unable to open the isolated-host transaction approval window");
+    }
+    const signingPopup = popup;
+
+    const storedSession = await this.sessionStore.load();
+    const suppliedSessionMatches =
+      !input.session ||
+      (storedSession !== null &&
+        input.session.configAddress === storedSession.configAddress &&
+        input.session.walletAddress === storedSession.walletAddress &&
+        input.session.roleId === storedSession.roleId &&
+        input.session.authFlow === storedSession.authFlow &&
+        input.session.authorityPublicKey === storedSession.authorityPublicKey &&
+        input.session.expiresAt === storedSession.expiresAt);
+    const session = suppliedSessionMatches ? (input.session ?? storedSession) : null;
+    if (
+      !session ||
+      session.authFlow !== "session" ||
+      !session.authorityPublicKey ||
+      !Number.isSafeInteger(session.expiresAt) ||
+      (session.expiresAt ?? 0) <= Date.now() ||
+      (input.swigPubkey && session.configAddress !== input.swigPubkey)
+    ) {
+      signingPopup.close();
+      const refreshSwigPubkey = input.swigPubkey ?? session?.configAddress;
+      throw new SwigProofSessionReauthRequiredError({
+        status: "reauth_required",
+        session,
+        reason: session ? "expired" : "missing_session",
+        refreshUrl: this.getProofSessionRefreshUrl({
+          ...input,
+          ...(refreshSwigPubkey ? { swigPubkey: refreshSwigPubkey } : {}),
+        }),
+        message: "No active isolated-host managed session",
+      });
+    }
+    const sessionPublicKey = session.authorityPublicKey;
+    const url = this.getTransactionSignUrl({
+      ...input,
+      requestId,
+      swigPubkey: input.swigPubkey ?? session.configAddress,
+    });
+
+    return new Promise<IsolatedHostSignedTransaction>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        browserWindow.removeEventListener("message", onMessage);
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (!signingPopup.closed) {
+          signingPopup.close();
+        }
+      };
+
+      const fail = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+
+      const finish = (signed: IsolatedHostSignedTransaction) => {
+        cleanup();
+        resolve(signed);
+      };
+
+      function onMessage(event: MessageEvent) {
+        if (event.origin !== isolatedHostOrigin || event.source !== signingPopup) {
+          return;
+        }
+
+        if (isTransactionSignReadyMessage(event.data, requestId, sessionPublicKey)) {
+          try {
+            signingPopup.postMessage(
+              {
+                type: TRANSACTION_SIGN_REQUEST_MESSAGE_TYPE,
+                requestId,
+                prepared,
+              },
+              isolatedHostOrigin,
+            );
+          } catch (error) {
+            fail(error instanceof Error ? error : new Error("Unable to send transaction"));
+          }
+          return;
+        }
+
+        const result = parseTransactionSignResultMessage(event.data, requestId, sessionPublicKey);
+        if (!result) {
+          return;
+        }
+        if (result.status === "signed") {
+          finish(result.signed);
+          return;
+        }
+        fail(new Error(result.message ?? "Isolated host rejected transaction signing"));
+      }
+
+      timer = setTimeout(() => {
+        fail(new Error("Timed out waiting for isolated-host transaction signing"));
+      }, input.timeoutMs ?? DEFAULT_PROOF_SESSION_TIMEOUT_MS);
+
+      browserWindow.addEventListener("message", onMessage);
+      try {
+        signingPopup.location.replace(url);
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error("Unable to open transaction approval"));
+      }
+    });
   }
 
   private resolveRedirectUri(redirectUri?: string): string {
@@ -853,20 +980,31 @@ const isProofSessionMetadata = (
 const isTransactionSignReadyMessage = (
   data: unknown,
   requestId: string,
+  sessionPublicKey: string,
 ): data is {
   type: typeof TRANSACTION_SIGN_READY_MESSAGE_TYPE;
   requestId: string;
+  sessionPublicKey: string;
 } => {
   if (!data || typeof data !== "object") {
     return false;
   }
-  const payload = data as { type?: unknown; requestId?: unknown };
-  return payload.type === TRANSACTION_SIGN_READY_MESSAGE_TYPE && payload.requestId === requestId;
+  const payload = data as {
+    type?: unknown;
+    requestId?: unknown;
+    sessionPublicKey?: unknown;
+  };
+  return (
+    payload.type === TRANSACTION_SIGN_READY_MESSAGE_TYPE &&
+    payload.requestId === requestId &&
+    payload.sessionPublicKey === sessionPublicKey
+  );
 };
 
 const parseTransactionSignResultMessage = (
   data: unknown,
   requestId: string,
+  sessionPublicKey: string,
 ):
   | {
       status: "signed";
@@ -886,11 +1024,16 @@ const parseTransactionSignResultMessage = (
     status?: unknown;
     signed?: unknown;
     message?: unknown;
+    sessionPublicKey?: unknown;
   };
   if (payload.type !== TRANSACTION_SIGN_RESULT_MESSAGE_TYPE || payload.requestId !== requestId) {
     return null;
   }
-  if (payload.status === "signed" && isSignedTransaction(payload.signed)) {
+  if (
+    payload.status === "signed" &&
+    payload.sessionPublicKey === sessionPublicKey &&
+    isSignedTransaction(payload.signed)
+  ) {
     return { status: "signed", signed: payload.signed };
   }
   if (payload.status === "error") {
@@ -915,6 +1058,7 @@ const isSignedTransaction = (value: unknown): value is IsolatedHostSignedTransac
   };
   return (
     typeof signed.transaction === "string" &&
-    (signed.transactionEncoding === undefined || typeof signed.transactionEncoding === "string")
+    signed.transaction.length > 0 &&
+    signed.transactionEncoding === "base64"
   );
 };

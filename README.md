@@ -165,12 +165,19 @@ Useful web client methods:
 - `getOAuthStartUrl(input)` builds the isolated host URL without navigating.
 - `redirectToOAuth(input)` performs a full-page browser redirect.
 - `completeOAuthFromUrl(url)` parses and persists the callback session.
+- `createSigner(input)` signs prepared Solana transactions in a visible isolated-host approval window.
 - `getSession()` returns persisted session data.
 - `getPersistedSession()` returns the full persisted session.
 - `logout()` clears the stored session.
 - `listProviders({ clientId })` lists configured IdP providers.
 
 Web session persistence defaults to `window.localStorage`. Pass a custom `storage` adapter to use `sessionStorage`, cookies, or framework-managed storage.
+
+Managed-session callbacks include the isolated host's Ed25519 public key and a
+bounded expiration. The corresponding non-exportable private key remains on the
+isolated-host origin. `createSigner()` requires that managed-session metadata,
+opens the isolated host for explicit approval, and returns the transaction only
+after the isolated host signs it.
 
 ## Notes
 
