@@ -24,7 +24,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "npm run build",
-    "test": "node --test",
+    "test": "npm run build && node --test",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
