@@ -1,3 +1,6 @@
+import { EmailOtpClient } from "./email-otp.js";
+export { EmailOtpError } from "./email-otp.js";
+export type { EmailOtpClient, StartEmailCodeInput, EmailCodeChallenge, EmailCodeCompletion, EmailCodeVerification, EmailCodeRequestOptions } from "./email-otp.js";
 import {
   DEFAULT_BACKEND_API_URL,
   DEFAULT_ISOLATED_HOST_URL,
@@ -262,6 +265,7 @@ class WebSessionStore {
 }
 
 export class SwigWebSdk {
+  readonly auth: { readonly email: EmailOtpClient };
   private readonly api: SwigApiClient;
   private readonly isolatedHostUrl: string;
   private readonly redirectUri: string | undefined;
@@ -269,6 +273,7 @@ export class SwigWebSdk {
   private readonly sessionStore: WebSessionStore;
 
   constructor(config: SwigWebSdkConfig = {}) {
+    this.auth = { email: new EmailOtpClient(config) };
     this.isolatedHostUrl = config.isolatedHostUrl ?? DEFAULT_ISOLATED_HOST_URL;
     this.redirectUri = config.redirectUri;
     this.network = config.network ?? DEFAULT_NETWORK;
