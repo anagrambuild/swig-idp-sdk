@@ -136,3 +136,25 @@ test("a blocked approval popup can be retried without verifying the code again",
   await client.approve({ challengeId: "challenge" });
   assert.equal(env.calls.filter((call) => call.method === "verify").length, 1);
 });
+
+test("scoped approval previews the verified wallet before approve is called", async (t) => {
+  const preview = {
+    walletAddress: "11111111111111111111111111111111",
+    agentPublicKey: "C1V95EbTgB93tgzwXhRbH7vobaNmZ59jKX1qQgUoMZFJ",
+    agentPolicy: { mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", tokenAmount: "100000000", solAmount: "1000000000", window: "216000" },
+  };
+  const env = environment(t, (command, respond) => respond(command.method === "start" ? challenge : command.method === "verify" ? { status: "approval_required", approvalId: "approval", ...preview } : { status: "complete", callbackUrl }));
+  const client = new EmailOtpClient(config);
+  await client.start(input);
+  assert.deepEqual(await client.verify({ challengeId: "challenge", code: "123456" }), { status: "approval_required", wallet: preview });
+  env.browser.open = () => env.popup;
+  await assert.rejects(client.approve({ challengeId: "challenge" }), { code: "invalid_response" });
+});
+
+test("a partial scoped preview cannot become an ordinary approval", async (t) => {
+  environment(t, (command, respond) => respond(command.method === "start" ? challenge : { status: "approval_required", approvalId: "approval", agentPolicy: {} }));
+  const client = new EmailOtpClient(config);
+  await client.start(input);
+  await assert.rejects(client.verify({ challengeId: "challenge", code: "123456" }), { code: "invalid_response" });
+  await assert.rejects(client.approve({ challengeId: "challenge" }), { code: "invalid_challenge" });
+});
