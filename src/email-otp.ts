@@ -274,5 +274,15 @@ function isAmount(value: unknown): value is string {
   return typeof value === "string" && /^[1-9]\d{0,19}$/.test(value) && BigInt(value) <= 0xffffffffffffffffn;
 }
 function isPublicKey(value: unknown): value is string {
-  return typeof value === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+  if (typeof value !== "string" || value.length < 32 || value.length > 44) return false;
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let number = 0n;
+  for (const char of value) {
+    const digit = alphabet.indexOf(char);
+    if (digit < 0) return false;
+    number = number * 58n + BigInt(digit);
+  }
+  const leadingZeroBytes = value.length - value.replace(/^1+/, "").length;
+  const significantBytes = number === 0n ? 0 : Math.ceil(number.toString(16).length / 2);
+  return leadingZeroBytes + significantBytes === 32;
 }
