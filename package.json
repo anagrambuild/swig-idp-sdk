@@ -22,7 +22,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
     "prepare": "npm run build",
     "test": "npm run build && node --test",
     "typecheck": "tsc --noEmit"
