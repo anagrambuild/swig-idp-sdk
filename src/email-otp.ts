@@ -34,7 +34,13 @@ export interface EmailCodeCompletion {
   callbackUrl: string;
 }
 
-export type EmailCodeVerification = EmailCodeCompletion | { status: "approval_required" };
+export interface EmailWalletPreview {
+  walletAddress: string;
+  agentPublicKey: string;
+  agentPolicy: { mint: string; tokenAmount: string; solAmount: string; window: string };
+}
+
+export type EmailCodeVerification = EmailCodeCompletion | { status: "approval_required"; wallet?: EmailWalletPreview };
 export interface EmailCodeRequestOptions { signal?: AbortSignal }
 
 export class EmailOtpError extends Error {
@@ -56,6 +62,7 @@ export class EmailOtpClient {
   private channel: string | null = null;
   private challenge: EmailCodeChallenge | null = null;
   private approvalId: string | null = null;
+  private previewAddress: string | null = null;
   private callback: { redirectUri: string; state: string } | null = null;
   private stopRequest: ((reason: unknown) => void) | null = null;
   private popup: Window | null = null;
@@ -100,7 +107,16 @@ export class EmailOtpClient {
       const result = await this.request({ method: "verify", ...input }, options.signal);
       if (isRecord(result) && result.status === "approval_required" && typeof result.approvalId === "string" && result.approvalId) {
         this.approvalId = result.approvalId;
-        return { status: "approval_required" };
+        if (!("walletAddress" in result) && !("agentPolicy" in result) && !("agentPublicKey" in result)) return { status: "approval_required" };
+        const policy = result.agentPolicy;
+        if (!isPublicKey(result.walletAddress) || !isPublicKey(result.agentPublicKey) || !isRecord(policy) ||
+          !isPublicKey(policy.mint) || !isAmount(policy.solAmount) || !isAmount(policy.tokenAmount) || !isAmount(policy.window)) {
+          this.cancel();
+          throw new EmailOtpError("invalid_response", "Invalid wallet approval preview");
+        }
+        this.previewAddress = result.walletAddress;
+        return { status: "approval_required", wallet: { walletAddress: result.walletAddress, agentPublicKey: result.agentPublicKey,
+          agentPolicy: { mint: policy.mint, solAmount: policy.solAmount, tokenAmount: policy.tokenAmount, window: policy.window } } };
       }
       return this.completion(result);
     } finally { this.busy = false; }
@@ -151,6 +167,7 @@ export class EmailOtpClient {
     this.challenge = null;
     this.approvalId = null;
     this.callback = null;
+    this.previewAddress = null;
     this.popup?.close();
     this.popup = null;
   }
@@ -172,7 +189,8 @@ export class EmailOtpClient {
     }
     const expected = new URL(this.callback.redirectUri);
     const fragment = new URLSearchParams(url.hash.slice(1));
-    if (url.origin !== expected.origin || url.pathname !== expected.pathname || (url.searchParams.get("state") ?? "") !== this.callback.state || !fragment.get("id_token")) {
+    if (url.origin !== expected.origin || url.pathname !== expected.pathname || (url.searchParams.get("state") ?? "") !== this.callback.state || !fragment.get("id_token") ||
+        (this.previewAddress !== null && url.searchParams.get("wallet_address") !== this.previewAddress)) {
       this.cancel();
       throw new EmailOtpError("invalid_response", "Authentication completion does not match this application");
     }
@@ -250,4 +268,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 function validCooldown(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isAmount(value: unknown): value is string {
+  return typeof value === "string" && /^[1-9]\d{0,19}$/.test(value) && BigInt(value) <= 0xffffffffffffffffn;
+}
+function isPublicKey(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 32 || value.length > 44) return false;
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let number = 0n;
+  for (const char of value) {
+    const digit = alphabet.indexOf(char);
+    if (digit < 0) return false;
+    number = number * 58n + BigInt(digit);
+  }
+  const leadingZeroBytes = value.length - value.replace(/^1+/, "").length;
+  const significantBytes = number === 0n ? 0 : Math.ceil(number.toString(16).length / 2);
+  return leadingZeroBytes + significantBytes === 32;
 }
