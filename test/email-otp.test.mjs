@@ -140,6 +140,8 @@ test("reuses the verification window for trusted consent without a second popup"
   await client.start(input);
   await client.verify({ challengeId: "challenge", code: "123456" });
   env.browser.open = () => assert.fail("opened a second popup");
+  await assert.rejects(client.approve({ challengeId: "challenge" }, { approvalWindow: { closed: true } }), { code: "popup_closed" });
+  assert.equal(env.calls.filter((call) => call.method === "complete").length, 0);
   const navigations = [];
   env.popup.location = { replace(url) { navigations.push(new URL(url)); } };
   const result = await client.approve({ challengeId: "challenge" }, { approvalWindow: env.popup });
@@ -174,7 +176,7 @@ test("scoped approval previews the verified wallet before approve is called", as
   const client = new EmailOtpClient(config);
   await client.start(input);
   assert.deepEqual(await client.verify({ challengeId: "challenge", code: "123456" }), { status: "approval_required", wallet: preview });
-  env.browser.open = () => env.popup;
+  env.browser.open = () => ({ closed: false, close() { this.closed = true; } });
   assert.deepEqual(await client.approve({challengeId:"challenge"}), {status:"complete", callbackUrl:completeUrl});
   completeUrl = callbackUrl;
   await client.start(input);
