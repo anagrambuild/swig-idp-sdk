@@ -53,7 +53,7 @@ export class EmailOtpError extends Error {
 
 type Command =
   | { method: "start"; input: StartEmailCodeInput & { redirectUri: string; network: NetworkValue } }
-  | { method: "verify"; challengeId: string; code: string }
+  | { method: "verify"; challengeId: string; code: string; supportsPermissionReview: true }
   | { method: "resend"; challengeId: string }
   | { method: "complete"; challengeId: string };
 
@@ -105,7 +105,7 @@ export class EmailOtpClient {
     if (!/^\d{6}$/.test(input.code)) throw new EmailOtpError("invalid_code", "Enter the six-digit code");
     this.busy = true;
     try {
-      const result = await this.request({ method: "verify", ...input }, options.signal);
+      const result = await this.request({ method: "verify", ...input, supportsPermissionReview: true }, options.signal);
       if (isRecord(result) && result.status === "approval_required" && typeof result.approvalId === "string" && result.approvalId) {
         this.approvalId = result.approvalId;
         const hasWallet = "walletAddress" in result;
