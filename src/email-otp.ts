@@ -132,16 +132,18 @@ export class EmailOtpClient {
     } finally { this.busy = false; }
   }
 
-  /** Call directly from a user click. Only new developer access opens trusted consent UI. */
-  async approve(input: { challengeId: string }, options: EmailCodeRequestOptions = {}): Promise<EmailCodeCompletion> {
+  /** Open consent from a click, or reuse a window opened by the Verify email click. */
+  async approve(input: { challengeId: string }, options: EmailCodeRequestOptions & { approvalWindow?: Window } = {}): Promise<EmailCodeCompletion> {
     this.requireChallenge(input.challengeId);
     if (!this.approvalId || !this.iframe) throw new EmailOtpError("invalid_request", "No wallet approval is pending");
     const frameIndex = Array.from(document.querySelectorAll("iframe, frame")).indexOf(this.iframe);
     if (frameIndex < 0) throw new EmailOtpError("cancelled", "The authentication frame was removed");
     const url = new URL("/email-otp/approval", this.host);
     url.hash = new URLSearchParams({ channel: this.channel ?? "", approvalId: this.approvalId, frameIndex: String(frameIndex) }).toString();
-    const popup = window.open(url.toString(), "_blank", "popup,width=480,height=720");
+    const popup = options.approvalWindow ?? window.open(url.toString(), "_blank", "popup,width=480,height=720");
     if (!popup) throw new EmailOtpError("popup_blocked", "Allow the wallet approval popup, then try again");
+    if (popup.closed) throw new EmailOtpError("popup_closed", "The wallet approval window was closed");
+    if (options.approvalWindow) popup.location.replace(url.toString());
     this.popup = popup;
     this.busy = true;
     const closePoll = setInterval(() => {
