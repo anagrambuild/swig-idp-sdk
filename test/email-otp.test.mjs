@@ -134,6 +134,23 @@ test("new wallet access opens a trusted popup synchronously and completes only a
   assert.equal(env.popup.closed, true);
 });
 
+test("reuses the verification window for trusted consent without a second popup", async (t) => {
+  const env = environment(t, (command, respond) => respond(command.method === "start" ? challenge : command.method === "verify" ? { status: "approval_required", approvalId: "approval" } : { status: "complete", callbackUrl }));
+  const client = new EmailOtpClient(config);
+  await client.start(input);
+  await client.verify({ challengeId: "challenge", code: "123456" });
+  env.browser.open = () => assert.fail("opened a second popup");
+  const navigations = [];
+  env.popup.location = { replace(url) { navigations.push(new URL(url)); } };
+  const result = await client.approve({ challengeId: "challenge" }, { approvalWindow: env.popup });
+  assert.equal(result.callbackUrl, callbackUrl);
+  assert.equal(navigations.length, 1);
+  assert.equal(navigations[0].origin, config.isolatedHostUrl);
+  assert.equal(navigations[0].pathname, "/email-otp/approval");
+  assert.equal(new URLSearchParams(navigations[0].hash.slice(1)).get("approvalId"), "approval");
+  assert.equal(env.popup.closed, true);
+});
+
 test("a blocked approval popup can be retried without verifying the code again", async (t) => {
   const env = environment(t, (command, respond) => respond(command.method === "start" ? challenge : command.method === "verify" ? { status: "approval_required", approvalId: "approval" } : { status: "complete", callbackUrl }));
   const client = new EmailOtpClient(config);
