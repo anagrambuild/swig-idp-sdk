@@ -18,7 +18,7 @@ function environment(t, handler) {
   browser.open = () => popup;
   const emit = (frame, data, overrides = {}) => {
     const event = new Event("message");
-    Object.assign(event, { origin: "https://idp.example.test", source: frame.contentWindow, data, ...overrides });
+    Object.assign(event, { origin: new URL(frame.src).origin, source: frame.contentWindow, data, ...overrides });
     browser.dispatchEvent(event);
   };
   globalThis.window = browser;
@@ -29,7 +29,7 @@ function environment(t, handler) {
         remove() { this.removed = true; },
         contentWindow: {
           postMessage(message, origin) {
-            assert.equal(origin, "https://idp.example.test");
+            assert.equal(origin, new URL(frame.src).origin);
             calls.push(message.command);
             const respond = (result, extras = {}) => queueMicrotask(() => emit(frame, { ...message, kind: "response", ok: true, result, ...extras }));
             handler(message.command, respond, (data, overrides) => emit(frame, { ...message, kind: "response", ok: true, ...data }, overrides));
@@ -45,11 +45,20 @@ function environment(t, handler) {
   return { calls, frames, popup, browser };
 }
 
+test("default email sign-in loads the production identity callback origin", async (t) => {
+  const env = environment(t, (_command, respond) => respond(challenge));
+  const client = new EmailOtpClient({ redirectUri: config.redirectUri });
+  assert.deepEqual(await client.start(input), challenge);
+  assert.equal(new URL(env.frames[0].src).origin, "https://isolate.onswig.com");
+  client.cancel();
+});
+
 test("email operations preserve app bindings, return only completion, and release the frame", async (t) => {
   const env = environment(t, (command, respond) => respond(command.method === "start" ? challenge : command.method === "resend" ? { resendAfterSeconds: 30 } : { status: "complete", callbackUrl }));
   const client = new EmailOtpClient(config);
   assert.deepEqual(await client.start(input), challenge);
   assert.deepEqual(env.calls[0].input, { ...input, redirectUri: config.redirectUri, network: 1 });
+  assert.equal(new URL(env.frames[0].src).origin, config.isolatedHostUrl);
   assert.equal(new URL(env.frames[0].src).pathname, "/email-otp-bridge.html");
   assert.equal(env.frames[0].src.includes(input.email), false);
   assert.deepEqual(await client.resend({ challengeId: challenge.challengeId }), { resendAfterSeconds: 30 });
