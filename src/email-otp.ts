@@ -63,7 +63,7 @@ export class EmailOtpClient {
   private channel: string | null = null;
   private challenge: EmailCodeChallenge | null = null;
   private approvalId: string | null = null;
-  private previewAddress: string | null = null;
+  private expectedWallet: { address?: string } | null = null;
   private callback: { redirectUri: string; state: string } | null = null;
   private stopRequest: ((reason: unknown) => void) | null = null;
   private popup: Window | null = null;
@@ -119,9 +119,10 @@ export class EmailOtpClient {
         const permissions = { agentPublicKey: result.agentPublicKey,
           agentPolicy: { mint: policy.mint, solAmount: policy.solAmount, tokenAmount: policy.tokenAmount, window: policy.window } };
         if (typeof result.walletAddress === "string") {
-          this.previewAddress = result.walletAddress;
+          this.expectedWallet = { address: result.walletAddress };
           return { status: "approval_required", wallet: { walletAddress: result.walletAddress, ...permissions } };
         }
+        this.expectedWallet = {};
         return { status: "approval_required", permissions };
       }
       return this.completion(result);
@@ -175,7 +176,7 @@ export class EmailOtpClient {
     this.challenge = null;
     this.approvalId = null;
     this.callback = null;
-    this.previewAddress = null;
+    this.expectedWallet = null;
     this.popup?.close();
     this.popup = null;
   }
@@ -197,8 +198,9 @@ export class EmailOtpClient {
     }
     const expected = new URL(this.callback.redirectUri);
     const fragment = new URLSearchParams(url.hash.slice(1));
+    const walletAddress = url.searchParams.get("wallet_address");
     if (url.origin !== expected.origin || url.pathname !== expected.pathname || (url.searchParams.get("state") ?? "") !== this.callback.state || !fragment.get("id_token") ||
-        (this.previewAddress !== null && url.searchParams.get("wallet_address") !== this.previewAddress)) {
+        (this.expectedWallet && (!isPublicKey(walletAddress) || (this.expectedWallet.address !== undefined && walletAddress !== this.expectedWallet.address)))) {
       this.cancel();
       throw new EmailOtpError("invalid_response", "Authentication completion does not match this application");
     }
