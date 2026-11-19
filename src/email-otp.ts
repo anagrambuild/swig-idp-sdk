@@ -1,4 +1,4 @@
-import { DEFAULT_ISOLATED_HOST_URL, DEFAULT_NETWORK } from "./config.js";
+import { DEFAULT_EMAIL_OTP_HOST_URL, DEFAULT_NETWORK } from "./config.js";
 import { type NetworkValue } from "./utils.js";
 
 const MESSAGE_TYPE = "swig:email-otp:v1";
@@ -70,7 +70,7 @@ export class EmailOtpClient {
   private readonly host: URL;
 
   constructor(private readonly config: EmailOtpConfig = {}) {
-    this.host = new URL(config.isolatedHostUrl ?? DEFAULT_ISOLATED_HOST_URL);
+    this.host = new URL(config.isolatedHostUrl ?? DEFAULT_EMAIL_OTP_HOST_URL);
     if (this.host.username || this.host.password || (this.host.protocol !== "https:" && !(this.host.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(this.host.hostname)))) {
       throw new EmailOtpError("invalid_config", "The isolated host must use HTTPS");
     }
