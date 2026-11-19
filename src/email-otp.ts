@@ -34,13 +34,14 @@ export interface EmailCodeCompletion {
   callbackUrl: string;
 }
 
-export interface EmailWalletPreview {
-  walletAddress: string;
+export interface EmailWalletPermissions {
   agentPublicKey: string;
   agentPolicy: { mint: string; tokenAmount: string; solAmount: string; window: string };
 }
 
-export type EmailCodeVerification = EmailCodeCompletion | { status: "approval_required"; wallet?: EmailWalletPreview };
+export interface EmailWalletPreview extends EmailWalletPermissions { walletAddress: string }
+
+export type EmailCodeVerification = EmailCodeCompletion | { status: "approval_required"; wallet?: EmailWalletPreview; permissions?: EmailWalletPermissions };
 export interface EmailCodeRequestOptions { signal?: AbortSignal }
 
 export class EmailOtpError extends Error {
@@ -107,16 +108,21 @@ export class EmailOtpClient {
       const result = await this.request({ method: "verify", ...input }, options.signal);
       if (isRecord(result) && result.status === "approval_required" && typeof result.approvalId === "string" && result.approvalId) {
         this.approvalId = result.approvalId;
-        if (!("walletAddress" in result) && !("agentPolicy" in result) && !("agentPublicKey" in result)) return { status: "approval_required" };
+        const hasWallet = "walletAddress" in result;
+        if (!hasWallet && !("agentPolicy" in result) && !("agentPublicKey" in result)) return { status: "approval_required" };
         const policy = result.agentPolicy;
-        if (!isPublicKey(result.walletAddress) || !isPublicKey(result.agentPublicKey) || !isRecord(policy) ||
+        if ((hasWallet && !isPublicKey(result.walletAddress)) || !isPublicKey(result.agentPublicKey) || !isRecord(policy) ||
           !isPublicKey(policy.mint) || !isAmount(policy.solAmount) || !isAmount(policy.tokenAmount) || !isAmount(policy.window)) {
           this.cancel();
           throw new EmailOtpError("invalid_response", "Invalid wallet approval preview");
         }
-        this.previewAddress = result.walletAddress;
-        return { status: "approval_required", wallet: { walletAddress: result.walletAddress, agentPublicKey: result.agentPublicKey,
-          agentPolicy: { mint: policy.mint, solAmount: policy.solAmount, tokenAmount: policy.tokenAmount, window: policy.window } } };
+        const permissions = { agentPublicKey: result.agentPublicKey,
+          agentPolicy: { mint: policy.mint, solAmount: policy.solAmount, tokenAmount: policy.tokenAmount, window: policy.window } };
+        if (typeof result.walletAddress === "string") {
+          this.previewAddress = result.walletAddress;
+          return { status: "approval_required", wallet: { walletAddress: result.walletAddress, ...permissions } };
+        }
+        return { status: "approval_required", permissions };
       }
       return this.completion(result);
     } finally { this.busy = false; }

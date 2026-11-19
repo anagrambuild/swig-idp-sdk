@@ -184,6 +184,15 @@ test("scoped approval previews the verified wallet before approve is called", as
   await assert.rejects(client.approve({ challengeId: "challenge" }), { code: "invalid_response" });
 });
 
+test("accepts scoped permissions before the wallet address is available", async (t) => {
+  const permissions = { agentPublicKey: "1".repeat(32), agentPolicy: {
+    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", tokenAmount: "100000000", solAmount: "1000000000", window: "216000" } };
+  environment(t, (command, respond) => respond(command.method === "start" ? challenge : { status: "approval_required", approvalId: "approval", ...permissions }));
+  const client = new EmailOtpClient(config);
+  await client.start(input);
+  assert.deepEqual(await client.verify({ challengeId:"challenge",code:"123456" }), { status:"approval_required",permissions });
+});
+
 test("a partial scoped preview cannot become an ordinary approval", async (t) => {
   environment(t, (command, respond) => respond(command.method === "start" ? challenge : { status: "approval_required", approvalId: "approval", agentPolicy: {} }));
   const client = new EmailOtpClient(config);
