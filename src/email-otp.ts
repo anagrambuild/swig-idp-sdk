@@ -34,13 +34,14 @@ export interface EmailCodeCompletion {
   callbackUrl: string;
 }
 
-export interface EmailWalletPreview {
-  walletAddress: string;
+export interface EmailWalletPermissions {
   agentPublicKey: string;
   agentPolicy: { mint: string; tokenAmount: string; solAmount: string; window: string };
 }
 
-export type EmailCodeVerification = EmailCodeCompletion | { status: "approval_required"; wallet?: EmailWalletPreview };
+export interface EmailWalletPreview extends EmailWalletPermissions { walletAddress: string }
+
+export type EmailCodeVerification = EmailCodeCompletion | { status: "approval_required"; wallet?: EmailWalletPreview; permissions?: EmailWalletPermissions };
 export interface EmailCodeRequestOptions { signal?: AbortSignal }
 
 export class EmailOtpError extends Error {
@@ -52,7 +53,7 @@ export class EmailOtpError extends Error {
 
 type Command =
   | { method: "start"; input: StartEmailCodeInput & { redirectUri: string; network: NetworkValue } }
-  | { method: "verify"; challengeId: string; code: string }
+  | { method: "verify"; challengeId: string; code: string; supportsPermissionReview: true }
   | { method: "resend"; challengeId: string }
   | { method: "complete"; challengeId: string };
 
@@ -62,7 +63,7 @@ export class EmailOtpClient {
   private channel: string | null = null;
   private challenge: EmailCodeChallenge | null = null;
   private approvalId: string | null = null;
-  private previewAddress: string | null = null;
+  private expectedWallet: { address?: string } | null = null;
   private callback: { redirectUri: string; state: string } | null = null;
   private stopRequest: ((reason: unknown) => void) | null = null;
   private popup: Window | null = null;
@@ -104,19 +105,25 @@ export class EmailOtpClient {
     if (!/^\d{6}$/.test(input.code)) throw new EmailOtpError("invalid_code", "Enter the six-digit code");
     this.busy = true;
     try {
-      const result = await this.request({ method: "verify", ...input }, options.signal);
+      const result = await this.request({ method: "verify", ...input, supportsPermissionReview: true }, options.signal);
       if (isRecord(result) && result.status === "approval_required" && typeof result.approvalId === "string" && result.approvalId) {
         this.approvalId = result.approvalId;
-        if (!("walletAddress" in result) && !("agentPolicy" in result) && !("agentPublicKey" in result)) return { status: "approval_required" };
+        const hasWallet = "walletAddress" in result;
+        if (!hasWallet && !("agentPolicy" in result) && !("agentPublicKey" in result)) return { status: "approval_required" };
         const policy = result.agentPolicy;
-        if (!isPublicKey(result.walletAddress) || !isPublicKey(result.agentPublicKey) || !isRecord(policy) ||
+        if ((hasWallet && !isPublicKey(result.walletAddress)) || !isPublicKey(result.agentPublicKey) || !isRecord(policy) ||
           !isPublicKey(policy.mint) || !isAmount(policy.solAmount) || !isAmount(policy.tokenAmount) || !isAmount(policy.window)) {
           this.cancel();
           throw new EmailOtpError("invalid_response", "Invalid wallet approval preview");
         }
-        this.previewAddress = result.walletAddress;
-        return { status: "approval_required", wallet: { walletAddress: result.walletAddress, agentPublicKey: result.agentPublicKey,
-          agentPolicy: { mint: policy.mint, solAmount: policy.solAmount, tokenAmount: policy.tokenAmount, window: policy.window } } };
+        const permissions = { agentPublicKey: result.agentPublicKey,
+          agentPolicy: { mint: policy.mint, solAmount: policy.solAmount, tokenAmount: policy.tokenAmount, window: policy.window } };
+        if (typeof result.walletAddress === "string") {
+          this.expectedWallet = { address: result.walletAddress };
+          return { status: "approval_required", wallet: { walletAddress: result.walletAddress, ...permissions } };
+        }
+        this.expectedWallet = {};
+        return { status: "approval_required", permissions };
       }
       return this.completion(result);
     } finally { this.busy = false; }
@@ -169,7 +176,7 @@ export class EmailOtpClient {
     this.challenge = null;
     this.approvalId = null;
     this.callback = null;
-    this.previewAddress = null;
+    this.expectedWallet = null;
     this.popup?.close();
     this.popup = null;
   }
@@ -191,8 +198,9 @@ export class EmailOtpClient {
     }
     const expected = new URL(this.callback.redirectUri);
     const fragment = new URLSearchParams(url.hash.slice(1));
+    const walletAddress = url.searchParams.get("wallet_address");
     if (url.origin !== expected.origin || url.pathname !== expected.pathname || (url.searchParams.get("state") ?? "") !== this.callback.state || !fragment.get("id_token") ||
-        (this.previewAddress !== null && url.searchParams.get("wallet_address") !== this.previewAddress)) {
+        (this.expectedWallet && (!isPublicKey(walletAddress) || (this.expectedWallet.address !== undefined && walletAddress !== this.expectedWallet.address)))) {
       this.cancel();
       throw new EmailOtpError("invalid_response", "Authentication completion does not match this application");
     }

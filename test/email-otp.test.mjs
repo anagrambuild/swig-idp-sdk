@@ -184,6 +184,28 @@ test("scoped approval previews the verified wallet before approve is called", as
   await assert.rejects(client.approve({ challengeId: "challenge" }), { code: "invalid_response" });
 });
 
+test("accepts scoped permissions before the wallet address is available", async (t) => {
+  const permissions = { agentPublicKey: "1".repeat(32), agentPolicy: {
+    mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", tokenAmount: "100000000", solAmount: "1000000000", window: "216000" } };
+  let destination = callbackUrl;
+  const env = environment(t, (command, respond) => respond(command.method === "start" ? challenge :
+    command.method === "verify" ? { status: "approval_required", approvalId: "approval", ...permissions } :
+    { status: "complete", callbackUrl: destination }));
+  env.browser.open = () => ({closed: false,close() { this.closed = true; }});
+  const client = new EmailOtpClient(config);
+  for (const address of [null, "invalid", "1".repeat(32)]) {
+    const url = new URL(callbackUrl);
+    if (address === null) url.searchParams.delete("wallet_address");
+    else url.searchParams.set("wallet_address",address);
+    destination = url.toString();
+    await client.start(input);
+    assert.deepEqual(await client.verify({ challengeId:"challenge",code:"123456" }), { status:"approval_required",permissions });
+    const complete = client.approve({challengeId:"challenge"});
+    if (address?.length === 32) assert.equal((await complete).callbackUrl,destination);
+    else await assert.rejects(complete,{code:"invalid_response"});
+  }
+});
+
 test("a partial scoped preview cannot become an ordinary approval", async (t) => {
   environment(t, (command, respond) => respond(command.method === "start" ? challenge : { status: "approval_required", approvalId: "approval", agentPolicy: {} }));
   const client = new EmailOtpClient(config);

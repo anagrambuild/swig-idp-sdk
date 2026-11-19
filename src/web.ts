@@ -1,6 +1,6 @@
 import { EmailOtpClient } from "./email-otp.js";
 export { EmailOtpError } from "./email-otp.js";
-export type { EmailOtpClient, StartEmailCodeInput, EmailWalletPreview, EmailCodeChallenge, EmailCodeCompletion, EmailCodeVerification, EmailCodeRequestOptions } from "./email-otp.js";
+export type { EmailOtpClient, StartEmailCodeInput, EmailWalletPermissions, EmailWalletPreview, EmailCodeChallenge, EmailCodeCompletion, EmailCodeVerification, EmailCodeRequestOptions } from "./email-otp.js";
 import {
   DEFAULT_BACKEND_API_URL,
   DEFAULT_ISOLATED_HOST_URL,
